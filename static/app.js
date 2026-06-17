@@ -1,0 +1,1226 @@
+'use strict';
+
+// ── API ─────────────────────────────────────────────────────────────────────
+const API = {
+  async get(url) {
+    const r = await fetch(url);
+    return r.json();
+  },
+  async post(url, data) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    return r.json();
+  },
+  async put(url, data) {
+    const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    return r.json();
+  },
+  async del(url) {
+    const r = await fetch(url, { method: 'DELETE' });
+    return r.json();
+  },
+};
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+function fmt_eur(v) {
+  if (v == null || v === '') return '—';
+  return new Intl.NumberFormat('sk-SK', { style: 'currency', currency: 'EUR' }).format(v);
+}
+function fmt_date(v) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (isNaN(d)) return v;
+  return d.toLocaleDateString('sk-SK');
+}
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function statusBadge(s) {
+  if (!s) return '';
+  const map = {
+    'Očakávaný': 'ocakavany', 'Prebiehajúci': 'prebiehajuci', 'Fakturovať': 'fakturovat',
+    'Ukončený': 'ukonceny', 'Stornovaný': 'stornovany', 'Odložený': 'odlozeny',
+    'grafika': 'grafika', 'výroba': 'vyroba', 'naceniť': 'nacenit',
+    'hotovo': 'hotovo', 'fakturovať': 'fakturovat2', 'BD': 'bd',
+  };
+  const cls = map[s] || 'default';
+  return `<span class="badge badge-${cls}">${esc(s)}</span>`;
+}
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (k === 'class') e.className = v;
+    else if (k === 'style') e.style.cssText = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  });
+  children.forEach(c => {
+    if (typeof c === 'string') e.insertAdjacentHTML('beforeend', c);
+    else if (c) e.appendChild(c);
+  });
+  return e;
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+const State = {
+  view: 'projects',
+  lookups: {},
+  projects: { filters: {}, data: [] },
+  items: { filters: {}, data: [] },
+  invoices: { filters: {}, data: [] },
+  customers: { filters: {}, data: [] },
+  credits: { filters: {}, data: [] },
+  imposition: { filters: {}, data: [] },
+  editId: null,
+  editType: null,
+};
+
+// ── App ──────────────────────────────────────────────────────────────────────
+const App = {
+  async init() {
+    State.lookups = await API.get('/api/lookups');
+    const user = State.lookups.users?.[0];
+    if (user) document.getElementById('current-user').textContent = user.plne_meno || user.username || '';
+
+    document.querySelectorAll('#sidebar nav a').forEach(a => {
+      a.addEventListener('click', () => {
+        document.querySelectorAll('#sidebar nav a').forEach(x => x.classList.remove('active'));
+        a.classList.add('active');
+        this.navigate(a.dataset.view);
+      });
+    });
+    this.navigate('projects');
+  },
+
+  navigate(view) {
+    State.view = view;
+    this.closeDetail();
+    const titles = {
+      projects: 'Projekty', items: 'Položky', invoices: 'Faktúry',
+      customers: 'Zákazníci', credits: 'Bankové pohyby',
+      imposition: 'Vyradovanie', settings: 'Nastavenia',
+    };
+    document.getElementById('topbar-title').textContent = titles[view] || view;
+    document.getElementById('add-btn').style.display = view === 'settings' ? 'none' : '';
+    Views[view]?.render();
+  },
+
+  openAdd() { Views[State.view]?.openAdd?.(); },
+  closeModal() {
+    document.getElementById('modal-overlay').style.display = 'none';
+    State.editId = null;
+    State.editType = null;
+  },
+  openModal(title, bodyHtml, editId = null, showDelete = false) {
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-body').innerHTML = bodyHtml;
+    document.getElementById('modal-delete-btn').style.display = showDelete ? '' : 'none';
+    State.editId = editId;
+    State.editType = State.view;
+    document.getElementById('modal-overlay').style.display = 'flex';
+  },
+  async saveRecord() { Views[State.view]?.save?.(); },
+  async deleteRecord() { Views[State.view]?.delete?.(); },
+  closeDetail() {
+    document.getElementById('detail-panel').classList.remove('open');
+  },
+  openDetail(title, bodyHtml, editFn) {
+    document.getElementById('detail-title').textContent = title;
+    document.getElementById('detail-body').innerHTML = bodyHtml;
+    document.getElementById('detail-edit-btn').onclick = editFn || (() => {});
+    document.getElementById('detail-panel').classList.add('open');
+  },
+};
+
+// ── Views ────────────────────────────────────────────────────────────────────
+const Views = {};
+
+// ─── PROJECTS ────────────────────────────────────────────────────────────────
+Views.projects = {
+  chips: {},
+
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = this.filterBar();
+    cont.insertAdjacentHTML('beforeend', '<div id="proj-table-wrap"><div class="loading">Načítavam...</div></div>');
+    this.bindFilters();
+    await this.load();
+  },
+
+  filterBar() {
+    const stavy = State.lookups.stavy_projektov || [];
+    const opts = stavy.map(s => `<option value="${esc(s.nazov)}">${esc(s.nazov)}</option>`).join('');
+    const managers = [...new Set((State.projects.data || []).map(p => p.manazer).filter(Boolean))];
+    const mgOpts = managers.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    return `
+    <div class="filter-bar">
+      <input type="search" id="f-search" placeholder="Hľadať projekt / firmu..." value="${esc(State.projects.filters.search||'')}">
+      <select id="f-stav"><option value="">Všetky stavy</option>${opts}</select>
+      <select id="f-manazer"><option value="">Všetci manažéri</option>${mgOpts}</select>
+      <span style="color:#ccc">|</span>
+      ${['kreditny','zberny','kniha','cp','oznaceny','cakajuci','bezny','hotovo','expedovat','sledovany'].map(k =>
+        `<span class="chip ${State.projects.filters[k]?'active':''}" data-chip="${k}">${chipLabel(k)}</span>`
+      ).join('')}
+      <button class="btn btn-secondary btn-sm" onclick="Views.projects.clearFilters()">Zrušiť filtre</button>
+    </div>`;
+  },
+
+  bindFilters() {
+    document.getElementById('f-search')?.addEventListener('input', e => { State.projects.filters.search = e.target.value; this.load(); });
+    document.getElementById('f-stav')?.addEventListener('change', e => { State.projects.filters.stav = e.target.value; this.load(); });
+    document.getElementById('f-manazer')?.addEventListener('change', e => { State.projects.filters.manazer = e.target.value; this.load(); });
+    document.querySelectorAll('.chip[data-chip]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const k = chip.dataset.chip;
+        State.projects.filters[k] = !State.projects.filters[k];
+        chip.classList.toggle('active');
+        this.load();
+      });
+    });
+  },
+
+  clearFilters() {
+    State.projects.filters = {};
+    this.render();
+  },
+
+  async load() {
+    const f = State.projects.filters;
+    const params = new URLSearchParams({ limit: 300 });
+    if (f.search) params.set('search', f.search);
+    if (f.stav) params.set('stav', f.stav);
+    if (f.manazer) params.set('manazer', f.manazer);
+    ['kreditny','zberny','kniha','cp','oznaceny','cakajuci','bezny','hotovo','expedovat','sledovany'].forEach(k => {
+      if (f[k]) params.set(k, 'true');
+    });
+    const data = await API.get('/api/projects?' + params);
+    State.projects.data = data;
+    this.renderTable(data);
+  },
+
+  renderTable(data) {
+    const wrap = document.getElementById('proj-table-wrap');
+    if (!wrap) return;
+    if (!data.length) { wrap.innerHTML = '<div class="empty">Žiadne projekty</div>'; return; }
+    wrap.innerHTML = `
+    <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>ID</th><th>Názov projektu</th><th>Firma</th><th>Manažér</th>
+        <th>Stav</th><th>Prijaté</th><th>Termín</th>
+        <th>Cena s DPH</th><th>Zisk</th><th>Príznaky</th>
+      </tr></thead>
+      <tbody>
+      ${data.map(p => `
+        <tr data-id="${p.id}" onclick="Views.projects.openDetail(${p.id})">
+          <td class="mono">${p.id}</td>
+          <td class="td-truncate" style="max-width:220px">${esc(p.nazov_projektu||'')}</td>
+          <td class="td-truncate">${esc(p.nazov_firmy||'')}</td>
+          <td>${esc(p.manazer||'')}</td>
+          <td>${statusBadge(p.stav)}</td>
+          <td>${fmt_date(p.prijate)}</td>
+          <td>${fmt_date(p.termin_odovzdania)}</td>
+          <td class="cur">${fmt_eur(p.cena_s_dph)}</td>
+          <td class="cur ${(p.zisk||0)>=0?'cur-pos':'cur-neg'}">${fmt_eur(p.zisk)}</td>
+          <td>${projFlags(p)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="pagination"><span>${data.length} projektov</span></div>
+    </div>`;
+  },
+
+  async openDetail(id) {
+    const p = await API.get('/api/projects/' + id);
+    const items = await API.get('/api/projects/' + id + '/items');
+    const body = `
+      <div class="tabs">
+        <span class="tab active" onclick="switchTab(this,'tab-basic')">Základné</span>
+        <span class="tab" onclick="switchTab(this,'tab-items')">Položky (${items.length})</span>
+        <span class="tab" onclick="switchTab(this,'tab-notes')">Poznámky</span>
+        <span class="tab" onclick="switchTab(this,'tab-log')">Log</span>
+      </div>
+      <div id="tab-basic">
+        <div class="detail-grid">
+          ${dfield('ID',p.id)} ${dfield('Stav',statusBadge(p.stav))}
+          ${dfield('Firma',p.nazov_firmy)} ${dfield('Kontakt',p.priezvisko_meno)}
+          ${dfield('Manažér',p.manazer)} ${dfield('Kategória',p.kategoria)}
+          ${dfield('Prijaté',fmt_date(p.prijate))} ${dfield('Termín',fmt_date(p.termin_odovzdania))}
+          ${dfield('Č. objednávky',p.cislo_objednavky)} ${dfield('Č. CP',p.cislo_cp)}
+        </div>
+        <div class="detail-section"><h4>Financie</h4><div class="detail-grid">
+          ${dfield('Cena bez DPH',fmt_eur(p.cena_bez_dph))}
+          ${dfield('DPH',fmt_eur(p.dph_ceny))}
+          ${dfield('Cena s DPH',fmt_eur(p.cena_s_dph))}
+          ${dfield('Náklady',fmt_eur(p.naklady))}
+          ${dfield('Zisk',`<span class="${(p.zisk||0)>=0?'cur-pos':'cur-neg'}">${fmt_eur(p.zisk)}</span>`)}
+          ${dfield('Kredit',fmt_eur(p.kredit))}
+        </div></div>
+        <div class="detail-section"><h4>Príznaky</h4>
+          <div class="checkbox-row">
+            ${pflag('Kreditný',p.projekt_kreditny)} ${pflag('Zberný',p.projekt_zberny)}
+            ${pflag('Kniha',p.projekt_kniha)} ${pflag('CP',p.projekt_cp)}
+            ${pflag('Označený',p.projekt_oznaceny)} ${pflag('Sledovaný',p.projekt_sledovany)}
+            ${pflag('Čakajúci',p.projekt_cakajuci)} ${pflag('Bežný',p.projekt_bezny)}
+            ${pflag('Hotovo',p.projekt_hotovo)} ${pflag('Fakturovaný',p.projekt_fakturovany)}
+            ${pflag('Uhradený',p.projekt_uhradeny)} ${pflag('Expedovať',p.projekt_expedovat)}
+          </div>
+        </div>
+        ${p.strucna_specifikacia ? `<div class="detail-section"><h4>Stručná špecifikácia</h4><p style="font-size:13px">${esc(p.strucna_specifikacia)}</p></div>` : ''}
+      </div>
+      <div id="tab-items" style="display:none">
+        ${items.length ? itemsTable(items) : '<div class="empty">Žiadne položky</div>'}
+        <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.items.openAddForProject(${p.id})">+ Pridať položku</button>
+      </div>
+      <div id="tab-notes" style="display:none">
+        ${dfield('Poznámky',p.poznamky,'full')}
+        ${dfield('Poznámky ZL',p.poznamky_zl,'full')}
+        ${dfield('Poznámky 1',p.poznamky_1,'full')}
+        ${dfield('Poznámka CP',p.poznamka_cp,'full')}
+        ${dfield('Folder zákazky',p.folder_zakazky,'full')}
+        ${dfield('Folder CP',p.folder_cp,'full')}
+      </div>
+      <div id="tab-log" style="display:none">
+        <pre style="font-size:12px;white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:6px">${esc(p.projekt_log||'(prázdny log)')}</pre>
+      </div>
+    `;
+    App.openDetail(`#${p.id} – ${p.nazov_projektu||''}`, body, () => this.openEdit(p.id));
+  },
+
+  openAdd() { this.openForm(null); },
+  async openEdit(id) {
+    const p = await API.get('/api/projects/' + id);
+    this.openForm(p);
+  },
+
+  openForm(p) {
+    const stavy = State.lookups.stavy_projektov || [];
+    const stavOpts = stavy.map(s => `<option value="${esc(s.nazov)}" ${p?.stav===s.nazov?'selected':''}>${esc(s.nazov)}</option>`).join('');
+    const v = k => esc(p?.[k] ?? '');
+    const chk = k => p?.[k] ? 'checked' : '';
+    const body = `
+    <div class="tabs">
+      <span class="tab active" onclick="switchTab(this,'pf-basic')">Základné</span>
+      <span class="tab" onclick="switchTab(this,'pf-finance')">Financie</span>
+      <span class="tab" onclick="switchTab(this,'pf-flags')">Príznaky</span>
+      <span class="tab" onclick="switchTab(this,'pf-notes')">Poznámky</span>
+    </div>
+    <div id="pf-basic">
+      <div class="form-grid">
+        <div class="field form-full"><label>Názov projektu</label><input id="f-nazov_projektu" value="${v('nazov_projektu')}"></div>
+        <div class="field"><label>Firma</label><input id="f-nazov_firmy" value="${v('nazov_firmy')}"></div>
+        <div class="field"><label>Kontakt</label><input id="f-priezvisko_meno" value="${v('priezvisko_meno')}"></div>
+        <div class="field"><label>Manažér</label><input id="f-manazer" value="${v('manazer')}"></div>
+        <div class="field"><label>Stav</label><select id="f-stav"><option value="">—</option>${stavOpts}</select></div>
+        <div class="field"><label>Kategória</label><input id="f-kategoria" value="${v('kategoria')}"></div>
+        <div class="field"><label>Priorita</label><input id="f-priorita" value="${v('priorita')}"></div>
+        <div class="field"><label>Prijaté</label><input type="date" id="f-prijate" value="${isoDate(p?.prijate)}"></div>
+        <div class="field"><label>Termín odovzdania</label><input type="date" id="f-termin_odovzdania" value="${isoDate(p?.termin_odovzdania)}"></div>
+        <div class="field"><label>Č. objednávky</label><input id="f-cislo_objednavky" value="${v('cislo_objednavky')}"></div>
+        <div class="field"><label>Č. CP</label><input id="f-cislo_cp" value="${v('cislo_cp')}"></div>
+        <div class="field"><label>Stručná špecifikácia</label><input id="f-strucna_specifikacia" value="${v('strucna_specifikacia')}"></div>
+        <div class="field"><label>Folder zákazky</label><input id="f-folder_zakazky" value="${v('folder_zakazky')}"></div>
+        <div class="field"><label>Folder CP</label><input id="f-folder_cp" value="${v('folder_cp')}"></div>
+        <div class="field"><label>Zúčastnení</label><input id="f-zucastneni" value="${v('zucastneni')}"></div>
+      </div>
+    </div>
+    <div id="pf-finance" style="display:none">
+      <div class="form-grid">
+        <div class="field"><label>Cena bez DPH</label><input type="number" step="0.01" id="f-cena_bez_dph" value="${p?.cena_bez_dph??''}"></div>
+        <div class="field"><label>DPH</label><input type="number" step="0.01" id="f-dph_ceny" value="${p?.dph_ceny??''}"></div>
+        <div class="field"><label>Cena s DPH</label><input type="number" step="0.01" id="f-cena_s_dph" value="${p?.cena_s_dph??''}"></div>
+        <div class="field"><label>Náklady</label><input type="number" step="0.01" id="f-naklady" value="${p?.naklady??''}"></div>
+        <div class="field"><label>Zisk</label><input type="number" step="0.01" id="f-zisk" value="${p?.zisk??''}"></div>
+        <div class="field"><label>Kredit</label><input type="number" step="0.01" id="f-kredit" value="${p?.kredit??''}"></div>
+        <div class="field"><label>Cena bez FA</label><input type="number" step="0.01" id="f-cena_bez_fa" value="${p?.cena_bez_fa??''}"></div>
+        <div class="field"><label>Náklady bez FA</label><input type="number" step="0.01" id="f-naklady_bez_fa" value="${p?.naklady_bez_fa??''}"></div>
+      </div>
+    </div>
+    <div id="pf-flags" style="display:none">
+      <div class="checkbox-row" style="flex-direction:column;align-items:flex-start">
+        ${cbox('projekt_kreditny','Kreditný projekt',chk('projekt_kreditny'))}
+        ${cbox('projekt_zberny','Zberný projekt',chk('projekt_zberny'))}
+        ${cbox('projekt_kniha','Kniha',chk('projekt_kniha'))}
+        ${cbox('projekt_cp','CP',chk('projekt_cp'))}
+        ${cbox('projekt_oznaceny','Označený',chk('projekt_oznaceny'))}
+        ${cbox('projekt_sledovany','Sledovaný',chk('projekt_sledovany'))}
+        ${cbox('projekt_cakajuci','Čakajúci',chk('projekt_cakajuci'))}
+        ${cbox('projekt_bezny','Bežný',chk('projekt_bezny'))}
+        ${cbox('projekt_hotovo','Hotovo',chk('projekt_hotovo'))}
+        ${cbox('projekt_fakturovany','Fakturovaný',chk('projekt_fakturovany'))}
+        ${cbox('projekt_fakturovany_vopred','Fakturovaný vopred',chk('projekt_fakturovany_vopred'))}
+        ${cbox('projekt_uhradeny','Uhradený',chk('projekt_uhradeny'))}
+        ${cbox('projekt_expedovat','Expedovať',chk('projekt_expedovat'))}
+        ${cbox('vpt_agenturnacena','VpT agentúrna cena',chk('vpt_agenturnacena'))}
+      </div>
+    </div>
+    <div id="pf-notes" style="display:none">
+      <div class="form-grid">
+        <div class="field form-full"><label>Poznámky</label><textarea id="f-poznamky">${v('poznamky')}</textarea></div>
+        <div class="field form-full"><label>Poznámky ZL</label><textarea id="f-poznamky_zl">${v('poznamky_zl')}</textarea></div>
+        <div class="field form-full"><label>Poznámky 1</label><textarea id="f-poznamky_1">${v('poznamky_1')}</textarea></div>
+        <div class="field form-full"><label>Poznámka CP</label><textarea id="f-poznamka_cp">${v('poznamka_cp')}</textarea></div>
+        <div class="field form-full"><label>Log projektu</label><textarea id="f-projekt_log" style="min-height:100px">${v('projekt_log')}</textarea></div>
+      </div>
+    </div>`;
+    App.openModal(p ? `Upraviť projekt #${p.id}` : 'Nový projekt', body, p?.id, !!p);
+    if (p) document.getElementById('modal').classList.add('modal-lg');
+  },
+
+  async save() {
+    const fields = ['nazov_projektu','nazov_firmy','priezvisko_meno','manazer','stav','kategoria','priorita',
+      'cislo_objednavky','cislo_cp','strucna_specifikacia','folder_zakazky','folder_cp','zucastneni',
+      'poznamky','poznamky_zl','poznamky_1','poznamka_cp','projekt_log',
+      'cena_bez_dph','dph_ceny','cena_s_dph','naklady','zisk','kredit','cena_bez_fa','naklady_bez_fa'];
+    const bools = ['projekt_kreditny','projekt_zberny','projekt_kniha','projekt_cp','projekt_oznaceny',
+      'projekt_sledovany','projekt_cakajuci','projekt_bezny','projekt_hotovo','projekt_fakturovany',
+      'projekt_fakturovany_vopred','projekt_uhradeny','projekt_expedovat','vpt_agenturnacena'];
+    const dates = ['prijate','termin_odovzdania'];
+    const nums = ['cena_bez_dph','dph_ceny','cena_s_dph','naklady','zisk','kredit','cena_bez_fa','naklady_bez_fa'];
+    const data = {};
+    fields.forEach(f => {
+      const el = document.getElementById('f-'+f);
+      if (!el) return;
+      data[f] = el.value || null;
+    });
+    bools.forEach(f => { data[f] = !!document.getElementById('f-'+f)?.checked; });
+    dates.forEach(f => { const el = document.getElementById('f-'+f); if (el?.value) data[f] = el.value; else data[f] = null; });
+    nums.forEach(f => { if (data[f] !== null) data[f] = parseFloat(data[f]) || 0; });
+
+    if (State.editId) await API.put('/api/projects/' + State.editId, data);
+    else await API.post('/api/projects', data);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť projekt?')) return;
+    await API.del('/api/projects/' + State.editId);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+};
+
+// ─── ITEMS ───────────────────────────────────────────────────────────────────
+Views.items = {
+  async render() {
+    const cont = document.getElementById('content');
+    const statusOpts = (State.lookups.status_polozky||[]).map(s => `<option value="${esc(s.nazov)}">${esc(s.nazov)}</option>`).join('');
+    const typOpts = (State.lookups.typy_zakaziek||[]).map(s => `<option value="${esc(s.nazov)}">${esc(s.nazov)}</option>`).join('');
+    cont.innerHTML = `
+    <div class="filter-bar">
+      <input type="search" id="i-search" placeholder="Hľadať popis...">
+      <select id="i-status"><option value="">Všetky statusy</option>${statusOpts}</select>
+      <select id="i-typ"><option value="">Všetky typy</option>${typOpts}</select>
+      <label class="checkbox-item"><input type="checkbox" id="i-fakturovat"> Fakturovať</label>
+      <label class="checkbox-item"><input type="checkbox" id="i-fakturovane"> Fakturované</label>
+    </div>
+    <div id="items-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    ['i-search','i-status','i-typ','i-fakturovat','i-fakturovane'].forEach(id => {
+      document.getElementById(id)?.addEventListener('change', () => this.load());
+      if (id === 'i-search') document.getElementById(id)?.addEventListener('input', () => this.load());
+    });
+    await this.load();
+  },
+
+  async load() {
+    const params = new URLSearchParams({ limit: 300 });
+    const s = document.getElementById('i-status')?.value;
+    const t = document.getElementById('i-typ')?.value;
+    const fak = document.getElementById('i-fakturovat')?.checked;
+    const fakd = document.getElementById('i-fakturovane')?.checked;
+    if (s) params.set('status', s);
+    if (t) params.set('typ_zakazky', t);
+    if (fak) params.set('fakturovat', 'true');
+    if (fakd) params.set('fakturovane', 'true');
+    const data = await API.get('/api/items?' + params);
+    State.items.data = data;
+    const wrap = document.getElementById('items-table-wrap');
+    if (!wrap) return;
+    if (!data.length) { wrap.innerHTML = '<div class="empty">Žiadne položky</div>'; return; }
+    wrap.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Projekt</th><th>Popis</th><th>MJ</th><th>Počet</th><th>JC</th><th>Cena</th><th>Zľava</th><th>DPH</th><th>s DPH</th><th>Status</th><th>Typ</th><th>Fak.</th></tr></thead>
+      <tbody>${data.map(i => `
+        <tr onclick="Views.items.openDetail(${i.id})">
+          <td class="mono">${i.id}</td>
+          <td class="mono">${i.id_projektu||''}</td>
+          <td class="td-truncate">${esc(i.popis||'')}</td>
+          <td>${esc(i.mj||'')}</td>
+          <td>${i.pocet??''}</td>
+          <td class="cur">${fmt_eur(i.jc)}</td>
+          <td class="cur">${fmt_eur(i.cena)}</td>
+          <td>${i.zlava!=null?(i.zlava*100).toFixed(0)+'%':''}</td>
+          <td>${i.sadzba_dph!=null?(i.sadzba_dph*100).toFixed(0)+'%':''}</td>
+          <td class="cur">${fmt_eur(i.cena_s_dph)}</td>
+          <td>${statusBadge(i.status)}</td>
+          <td>${esc(i.typ_zakazky||'')}</td>
+          <td>${i.fakturovat?'✓':''} ${i.fakturovane?'✅':''}</td>
+        </tr>`).join('')}
+      </tbody></table>
+      <div class="pagination"><span>${data.length} položiek</span></div>
+    </div>`;
+  },
+
+  async openDetail(id) {
+    const item = State.items.data.find(i => i.id === id) || {};
+    const body = `
+      <div class="detail-grid">
+        ${dfield('ID',item.id)} ${dfield('Projekt ID',item.id_projektu)}
+        ${dfield('Popis',item.popis,'full')}
+        ${dfield('MJ',item.mj)} ${dfield('Počet',item.pocet)}
+        ${dfield('JC',fmt_eur(item.jc))} ${dfield('Cena',fmt_eur(item.cena))}
+        ${dfield('Zľava',item.zlava!=null?(item.zlava*100).toFixed(1)+'%':'')}
+        ${dfield('DPH',item.sadzba_dph!=null?(item.sadzba_dph*100).toFixed(0)+'%':'')}
+        ${dfield('Cena s DPH',fmt_eur(item.cena_s_dph))}
+        ${dfield('Status',statusBadge(item.status))} ${dfield('Typ zákazky',item.typ_zakazky)}
+        ${dfield('Fakturovať',item.fakturovat?'Áno':'Nie')} ${dfield('Fakturované',item.fakturovane?'Áno':'Nie')}
+        ${dfield('Č. faktúry',item.cislo_faktury)} ${dfield('Dátum fakt.',fmt_date(item.datum_fakturacie))}
+      </div>
+      ${item.popis ? `<div class="detail-section"><h4>Podpopis</h4><p style="font-size:13px">${esc(item.podpopis||'—')}</p></div>` : ''}
+      ${item.format ? `<div class="detail-section"><h4>Tlačové parametre</h4><div class="detail-grid">
+        ${dfield('Formát',item.format)} ${dfield('Väzba',item.vazba)}
+        ${dfield('Strán',item.pocet_stran)} ${dfield('Strán FAR',item.pocet_stran_far)}
+        ${dfield('Typ kalkulácie',item.typ_kalkulacie)}
+      </div></div>` : ''}
+      ${item.poznamka ? `<div class="detail-section"><h4>Poznámka</h4><p style="font-size:13px">${esc(item.poznamka)}</p></div>` : ''}
+    `;
+    App.openDetail(`Položka #${item.id}`, body, () => this.openEdit(id));
+  },
+
+  openAdd() { this.openForm(null, null); },
+  openAddForProject(projectId) { this.openForm(null, projectId); },
+  async openEdit(id) {
+    const item = await API.get('/api/items');
+    const found = State.items.data.find(i => i.id === id);
+    if (found) this.openForm(found, null);
+  },
+
+  openForm(item, projectId) {
+    const statOpts = (State.lookups.status_polozky||[]).map(s => `<option value="${esc(s.nazov)}" ${item?.status===s.nazov?'selected':''}>${esc(s.nazov)}</option>`).join('');
+    const typOpts = (State.lookups.typy_zakaziek||[]).map(s => `<option value="${esc(s.nazov)}" ${item?.typ_zakazky===s.nazov?'selected':''}>${esc(s.nazov)}</option>`).join('');
+    const vazbOpts = (State.lookups.vazby||[]).map(s => `<option value="${esc(s.vazba)}" ${item?.vazba===s.vazba?'selected':''}>${esc(s.vazba)} - ${esc(s.popis)}</option>`).join('');
+    const v = k => esc(item?.[k] ?? '');
+    const chk = k => item?.[k] ? 'checked' : '';
+    const body = `
+    <div class="tabs">
+      <span class="tab active" onclick="switchTab(this,'if-basic')">Základné</span>
+      <span class="tab" onclick="switchTab(this,'if-tlac')">Tlač</span>
+      <span class="tab" onclick="switchTab(this,'if-expedia')">Expedícia</span>
+    </div>
+    <div id="if-basic">
+      <div class="form-grid">
+        <div class="field"><label>Projekt ID</label><input type="number" id="fi-id_projektu" value="${item?.id_projektu ?? projectId ?? ''}"></div>
+        <div class="field"><label>Poradie</label><input type="number" id="fi-poradie" value="${item?.poradie??''}"></div>
+        <div class="field form-full"><label>Popis</label><input id="fi-popis" value="${v('popis')}"></div>
+        <div class="field form-full"><label>Podpopis</label><textarea id="fi-podpopis">${v('podpopis')}</textarea></div>
+        <div class="field"><label>MJ</label><input id="fi-mj" value="${v('mj')}"></div>
+        <div class="field"><label>Počet</label><input type="number" step="0.001" id="fi-pocet" value="${item?.pocet??''}" oninput="calcItemPrice()"></div>
+        <div class="field"><label>JC (bez DPH)</label><input type="number" step="0.01" id="fi-jc" value="${item?.jc??''}" oninput="calcItemPrice()"></div>
+        <div class="field"><label>Zľava (0-1)</label><input type="number" step="0.01" min="0" max="1" id="fi-zlava" value="${item?.zlava??0}" oninput="calcItemPrice()"></div>
+        <div class="field"><label>Cena bez DPH</label><input type="number" step="0.01" id="fi-cena" value="${item?.cena??''}" readonly style="background:#f8fafc"></div>
+        <div class="field"><label>Sadzba DPH (0-1)</label><input type="number" step="0.01" min="0" max="1" id="fi-sadzba_dph" value="${item?.sadzba_dph??0.2}" oninput="calcItemPrice()"></div>
+        <div class="field"><label>Cena s DPH</label><input type="number" step="0.01" id="fi-cena_s_dph" value="${item?.cena_s_dph??''}" readonly style="background:#f8fafc"></div>
+        <div class="field"><label>Status</label><select id="fi-status"><option value="">—</option>${statOpts}</select></div>
+        <div class="field"><label>Typ zákazky</label><select id="fi-typ_zakazky"><option value="">—</option>${typOpts}</select></div>
+        <div class="field form-full"><label>Stručná špecifikácia</label><input id="fi-strucna_specifikacia" value="${v('strucna_specifikacia')}"></div>
+        <div class="field form-full"><label>Poznámka</label><textarea id="fi-poznamka">${v('poznamka')}</textarea></div>
+      </div>
+      <div class="checkbox-row" style="margin-top:8px">
+        ${cbox('fi-fakturovat','Fakturovať',chk('fakturovat'))}
+        ${cbox('fi-fakturovane','Fakturované',chk('fakturovane'))}
+        ${cbox('fi-faktura_vopred','Faktúra vopred',chk('faktura_vopred'))}
+        ${cbox('fi-odovzdane','Odovzdané',chk('odovzdane'))}
+        ${cbox('fi-dl','DL',chk('dl'))}
+      </div>
+    </div>
+    <div id="if-tlac" style="display:none">
+      <div class="form-grid">
+        <div class="field"><label>Formát</label><input id="fi-format" value="${v('format')}"></div>
+        <div class="field"><label>Väzba</label><select id="fi-vazba"><option value="">—</option>${vazbOpts}</select></div>
+        <div class="field"><label>Strán celkom</label><input type="number" id="fi-pocet_stran" value="${item?.pocet_stran??''}"></div>
+        <div class="field"><label>Strán FAR</label><input type="number" id="fi-pocet_stran_far" value="${item?.pocet_stran_far??''}"></div>
+        <div class="field"><label>Typ kalkulácie</label><input id="fi-typ_kalkulacie" value="${v('typ_kalkulacie')}"></div>
+        <div class="field"><label>Vnútro papier typ</label><input id="fi-db_vn_papier_typ" value="${v('db_vn_papier_typ')}"></div>
+        <div class="field"><label>Vnútro lesk/mat</label><input id="fi-db_vn_papier_lesk_mat" value="${v('db_vn_papier_lesk_mat')}"></div>
+        <div class="field"><label>Obal farebnosť</label><input id="fi-db_ob_farebnost" value="${v('db_ob_farebnost')}"></div>
+        <div class="field"><label>Obal papier typ</label><input id="fi-db_ob_papier_typ" value="${v('db_ob_papier_typ')}"></div>
+        <div class="field"><label>Obal PÚ</label><input id="fi-db_ob_pu" value="${v('db_ob_pu')}"></div>
+        <div class="field"><label>Chrbát</label><input id="fi-db_chrbat" value="${v('db_chrbat')}"></div>
+        <div class="field"><label>Lacetka</label><input id="fi-db_lacetka" value="${v('db_lacetka')}"></div>
+      </div>
+    </div>
+    <div id="if-expedia" style="display:none">
+      <div class="form-grid">
+        ${cbox('fi-polozka_expedovat','Expedovať',chk('polozka_expedovat'))}
+        <div class="field"><label>Dátum expedície</label><input type="date" id="fi-polozka_expedovat_datum" value="${isoDate(item?.polozka_expedovat_datum)}"></div>
+        <div class="field"><label>Komu dodať</label><input id="fi-komu_dodat" value="${v('komu_dodat')}"></div>
+        <div class="field"><label>Kde vyzdvihnúť</label><input id="fi-polozka_kde_vyzdvihnut" value="${v('polozka_kde_vyzdvihnut')}"></div>
+        <div class="field"><label>Číslo faktúry</label><input id="fi-cislo_faktury" value="${v('cislo_faktury')}"></div>
+        <div class="field"><label>Dátum fakturácie</label><input type="date" id="fi-datum_fakturacie" value="${isoDate(item?.datum_fakturacie)}"></div>
+        <div class="field"><label>Kto fakturuje</label><input id="fi-kto_fakturuje" value="${v('kto_fakturuje')}"></div>
+      </div>
+    </div>`;
+    App.openModal(item ? `Upraviť položku #${item.id}` : 'Nová položka', body, item?.id, !!item);
+  },
+
+  async save() {
+    const textFields = ['popis','podpopis','mj','strucna_specifikacia','poznamka',
+      'status','typ_zakazky','format','vazba','typ_kalkulacie',
+      'db_vn_papier_typ','db_vn_papier_lesk_mat','db_vn_papier_specifikacia',
+      'db_ob_farebnost','db_ob_papier_typ','db_ob_papier_lesk_mat',
+      'db_ob_pu','db_chrbat','db_lacetka','komu_dodat','polozka_kde_vyzdvihnut',
+      'cislo_faktury','kto_fakturuje'];
+    const nums = ['pocet','jc','cena','zlava','sadzba_dph','cena_s_dph',
+      'pocet_stran','pocet_stran_far','id_projektu','poradie'];
+    const bools = ['fakturovat','fakturovane','faktura_vopred','odovzdane','dl','polozka_expedovat'];
+    const dates = ['polozka_expedovat_datum','datum_fakturacie'];
+    const data = {};
+    textFields.forEach(f => { const e = document.getElementById('fi-'+f); if (e) data[f] = e.value || null; });
+    nums.forEach(f => { const e = document.getElementById('fi-'+f); if (e) data[f] = e.value !== '' ? parseFloat(e.value) : null; });
+    bools.forEach(f => { data[f] = !!document.getElementById('fi-'+f)?.checked; });
+    dates.forEach(f => { const e = document.getElementById('fi-'+f); data[f] = e?.value || null; });
+
+    const pid = data.id_projektu;
+    if (State.editId) await API.put('/api/items/' + State.editId, data);
+    else if (pid) await API.post('/api/projects/' + pid + '/items', data);
+    App.closeModal();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť položku?')) return;
+    await API.del('/api/items/' + State.editId);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+};
+
+// ─── INVOICES ────────────────────────────────────────────────────────────────
+Views.invoices = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = `
+    <div class="filter-bar">
+      <input type="search" id="inv-search" placeholder="Hľadať odberateľa...">
+      <label class="checkbox-item"><input type="checkbox" id="inv-nezaplatene"> Nezaplatené</label>
+      <label class="checkbox-item"><input type="checkbox" id="inv-po_splatnosti"> Po splatnosti</label>
+    </div>
+    <div id="inv-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    ['inv-search','inv-nezaplatene','inv-po_splatnosti'].forEach(id => {
+      const el = document.getElementById(id);
+      el?.addEventListener(id==='inv-search'?'input':'change', () => this.load());
+    });
+    await this.load();
+  },
+
+  async load() {
+    const params = new URLSearchParams({ limit: 300 });
+    const s = document.getElementById('inv-search')?.value;
+    if (s) params.set('search', s);
+    if (document.getElementById('inv-nezaplatene')?.checked) params.set('nezaplatene', 'true');
+    if (document.getElementById('inv-po_splatnosti')?.checked) params.set('po_splatnosti', 'true');
+    const data = await API.get('/api/invoices?' + params);
+    State.invoices.data = data;
+    const wrap = document.getElementById('inv-table-wrap');
+    if (!wrap) return;
+    if (!data.length) { wrap.innerHTML = '<div class="empty">Žiadne faktúry</div>'; return; }
+    wrap.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Č. FA</th><th>Dátum</th><th>Odberateľ</th><th>Popis</th><th>Bez DPH</th><th>s DPH</th><th>k úhrade</th><th>Splatnosť</th><th>Zostáva</th><th>Dní po spl.</th><th>Dátum úhrady</th></tr></thead>
+      <tbody>${data.map(f => {
+        const overdue = (f.dni_po_splatnosti || 0) > 0 && (f.zostava_uhradit || 0) > 0;
+        const paid = (f.zostava_uhradit || 0) <= 0;
+        return `<tr class="${overdue?'overdue':paid?'paid':''}" onclick="Views.invoices.openDetail(${f.id})">
+          <td class="mono">${esc(f.cislo_faktury||'')}</td>
+          <td>${fmt_date(f.datum_vystavenia)}</td>
+          <td class="td-truncate">${esc(f.odberatel||'')}</td>
+          <td class="td-truncate">${esc(f.popis||'')}</td>
+          <td class="cur">${fmt_eur(f.suma_bez_dph)}</td>
+          <td class="cur">${fmt_eur(f.suma_s_dph)}</td>
+          <td class="cur">${fmt_eur(f.suma_k_uhrade)}</td>
+          <td>${fmt_date(f.datum_splatnosti)}</td>
+          <td class="cur ${overdue?'cur-neg':paid?'cur-pos':''}">${fmt_eur(f.zostava_uhradit)}</td>
+          <td ${overdue?'style="color:var(--danger);font-weight:600"':''}>${f.dni_po_splatnosti??'—'}</td>
+          <td>${fmt_date(f.datum_uhrady)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>
+      <div class="pagination">
+        <span>${data.length} faktúr | Celkom s DPH: <strong>${fmt_eur(data.reduce((a,f)=>a+(f.suma_s_dph||0),0))}</strong> | Zostáva uhradiť: <strong>${fmt_eur(data.reduce((a,f)=>a+(f.zostava_uhradit||0),0))}</strong></span>
+      </div>
+    </div>`;
+  },
+
+  async openDetail(id) {
+    const f = State.invoices.data.find(i => i.id === id) || {};
+    const overdue = (f.dni_po_splatnosti||0) > 0 && (f.zostava_uhradit||0) > 0;
+    const body = `
+      <div class="detail-grid">
+        ${dfield('Č. faktúry',f.cislo_faktury)} ${dfield('Dátum vystavenia',fmt_date(f.datum_vystavenia))}
+        ${dfield('Odberateľ',f.odberatel,'full')}
+        ${dfield('Popis',f.popis,'full')}
+        ${dfield('Suma bez DPH',fmt_eur(f.suma_bez_dph))} ${dfield('Suma s DPH',fmt_eur(f.suma_s_dph))}
+        ${dfield('Suma k úhrade',fmt_eur(f.suma_k_uhrade))} ${dfield('Dátum splatnosti',fmt_date(f.datum_splatnosti))}
+        ${dfield('Zostáva uhradiť',`<span class="${overdue?'cur-neg':'cur-pos'}">${fmt_eur(f.zostava_uhradit)}</span>`)}
+        ${dfield('Dní po splatnosti', overdue?`<span style="color:var(--danger);font-weight:600">${f.dni_po_splatnosti}</span>`:f.dni_po_splatnosti??'—')}
+        ${dfield('Dátum úhrady',fmt_date(f.datum_uhrady))}
+      </div>`;
+    App.openDetail(`Faktúra ${f.cislo_faktury}`, body, () => this.openEdit(id));
+  },
+
+  openAdd() { this.openForm(null); },
+  async openEdit(id) { const f = State.invoices.data.find(i => i.id === id); if (f) this.openForm(f); },
+
+  openForm(f) {
+    const v = k => esc(f?.[k] ?? '');
+    const body = `<div class="form-grid">
+      <div class="field"><label>Č. faktúry</label><input id="fv-cislo_faktury" value="${v('cislo_faktury')}"></div>
+      <div class="field"><label>Dátum vystavenia</label><input type="date" id="fv-datum_vystavenia" value="${isoDate(f?.datum_vystavenia)}"></div>
+      <div class="field form-full"><label>Odberateľ</label><input id="fv-odberatel" value="${v('odberatel')}"></div>
+      <div class="field form-full"><label>Popis</label><input id="fv-popis" value="${v('popis')}"></div>
+      <div class="field"><label>Suma bez DPH</label><input type="number" step="0.01" id="fv-suma_bez_dph" value="${f?.suma_bez_dph??''}"></div>
+      <div class="field"><label>Suma s DPH</label><input type="number" step="0.01" id="fv-suma_s_dph" value="${f?.suma_s_dph??''}"></div>
+      <div class="field"><label>Suma k úhrade</label><input type="number" step="0.01" id="fv-suma_k_uhrade" value="${f?.suma_k_uhrade??''}"></div>
+      <div class="field"><label>Dátum splatnosti</label><input type="date" id="fv-datum_splatnosti" value="${isoDate(f?.datum_splatnosti)}"></div>
+      <div class="field"><label>Zostáva uhradiť</label><input type="number" step="0.01" id="fv-zostava_uhradit" value="${f?.zostava_uhradit??''}"></div>
+      <div class="field"><label>Dní po splatnosti</label><input type="number" id="fv-dni_po_splatnosti" value="${f?.dni_po_splatnosti??''}"></div>
+      <div class="field"><label>Dátum úhrady</label><input type="date" id="fv-datum_uhrady" value="${isoDate(f?.datum_uhrady)}"></div>
+    </div>`;
+    App.openModal(f ? `Upraviť faktúru ${f.cislo_faktury}` : 'Nová faktúra', body, f?.id, !!f);
+  },
+
+  async save() {
+    const text = ['cislo_faktury','odberatel','popis'];
+    const nums = ['suma_bez_dph','suma_s_dph','suma_k_uhrade','zostava_uhradit','dni_po_splatnosti'];
+    const dates = ['datum_vystavenia','datum_splatnosti','datum_uhrady'];
+    const data = {};
+    text.forEach(f => { data[f] = document.getElementById('fv-'+f)?.value || null; });
+    nums.forEach(f => { const e = document.getElementById('fv-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value) : null; });
+    dates.forEach(f => { data[f] = document.getElementById('fv-'+f)?.value || null; });
+    if (State.editId) await API.put('/api/invoices/' + State.editId, data);
+    else await API.post('/api/invoices', data);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť faktúru?')) return;
+    await API.del('/api/invoices/' + State.editId);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+};
+
+// ─── CUSTOMERS ───────────────────────────────────────────────────────────────
+Views.customers = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = `
+    <div class="filter-bar"><input type="search" id="cust-search" placeholder="Hľadať zákazníka..."></div>
+    <div id="cust-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    document.getElementById('cust-search')?.addEventListener('input', () => this.load());
+    await this.load();
+  },
+
+  async load() {
+    const s = document.getElementById('cust-search')?.value;
+    const params = new URLSearchParams({ limit: 200 });
+    if (s) params.set('search', s);
+    const data = await API.get('/api/customers?' + params);
+    State.customers.data = data;
+    const wrap = document.getElementById('cust-table-wrap');
+    if (!wrap) return;
+    if (!data.length) { wrap.innerHTML = '<div class="empty">Žiadni zákazníci</div>'; return; }
+    wrap.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Meno</th><th>Ulica</th><th>PSČ</th><th>Mesto</th><th>Email</th><th>Telefón</th></tr></thead>
+      <tbody>${data.map(c => `<tr onclick="Views.customers.openDetail(${c.id})">
+        <td class="mono">${c.id}</td>
+        <td>${esc(c.customer_name||'')}</td>
+        <td>${esc(c.customer_street||'')}</td>
+        <td>${esc(c.customer_zipcode||'')}</td>
+        <td>${esc(c.customer_city||'')}</td>
+        <td>${c.customer_email?`<a href="mailto:${esc(c.customer_email)}" onclick="event.stopPropagation()">${esc(c.customer_email)}</a>`:''}</td>
+        <td>${esc(c.customer_phone||'')}</td>
+      </tr>`).join('')}
+      </tbody></table>
+      <div class="pagination"><span>${data.length} zákazníkov</span></div>
+    </div>`;
+  },
+
+  openDetail(id) {
+    const c = State.customers.data.find(x => x.id === id) || {};
+    const body = `<div class="detail-grid">
+      ${dfield('Meno',c.customer_name,'full')}
+      ${dfield('Ulica',c.customer_street,'full')}
+      ${dfield('PSČ',c.customer_zipcode)} ${dfield('Mesto',c.customer_city)}
+      ${dfield('Email',c.customer_email?`<a href="mailto:${esc(c.customer_email)}">${esc(c.customer_email)}</a>`:'')}
+      ${dfield('Telefón',c.customer_phone)}
+    </div>`;
+    App.openDetail(c.customer_name || 'Zákazník', body, () => this.openEdit(id));
+  },
+
+  openAdd() { this.openForm(null); },
+  openEdit(id) { const c = State.customers.data.find(x => x.id === id); if (c) this.openForm(c); },
+
+  openForm(c) {
+    const v = k => esc(c?.[k] ?? '');
+    const body = `<div class="form-grid">
+      <div class="field form-full"><label>Meno / Firma</label><input id="fc-customer_name" value="${v('customer_name')}"></div>
+      <div class="field form-full"><label>Ulica</label><input id="fc-customer_street" value="${v('customer_street')}"></div>
+      <div class="field"><label>PSČ</label><input id="fc-customer_zipcode" value="${v('customer_zipcode')}"></div>
+      <div class="field"><label>Mesto</label><input id="fc-customer_city" value="${v('customer_city')}"></div>
+      <div class="field"><label>Email</label><input type="email" id="fc-customer_email" value="${v('customer_email')}"></div>
+      <div class="field"><label>Telefón</label><input id="fc-customer_phone" value="${v('customer_phone')}"></div>
+    </div>`;
+    App.openModal(c ? 'Upraviť zákazníka' : 'Nový zákazník', body, c?.id, !!c);
+  },
+
+  async save() {
+    const fields = ['customer_name','customer_street','customer_zipcode','customer_city','customer_email','customer_phone'];
+    const data = {};
+    fields.forEach(f => { data[f] = document.getElementById('fc-'+f)?.value || null; });
+    if (State.editId) await API.put('/api/customers/' + State.editId, data);
+    else await API.post('/api/customers', data);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť zákazníka?')) return;
+    await API.del('/api/customers/' + State.editId);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+};
+
+// ─── CREDITS ─────────────────────────────────────────────────────────────────
+Views.credits = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = `
+    <div class="filter-bar">
+      <input type="search" id="cr-search" placeholder="Hľadať meno / memo...">
+      <select id="cr-trntype"><option value="">Všetky typy</option><option>CREDIT</option><option>DEBIT</option></select>
+    </div>
+    <div id="cr-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    ['cr-search','cr-trntype'].forEach(id => {
+      const e = document.getElementById(id);
+      e?.addEventListener(id==='cr-search'?'input':'change', () => this.load());
+    });
+    await this.load();
+  },
+
+  async load() {
+    const params = new URLSearchParams({ limit: 300 });
+    const s = document.getElementById('cr-search')?.value;
+    const t = document.getElementById('cr-trntype')?.value;
+    if (s) params.set('search', s);
+    if (t) params.set('trntype', t);
+    const data = await API.get('/api/credits?' + params);
+    State.credits.data = data;
+    const wrap = document.getElementById('cr-table-wrap');
+    if (!wrap) return;
+    if (!data.length) { wrap.innerHTML = '<div class="empty">Žiadne pohyby</div>'; return; }
+    wrap.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Typ</th><th>Dátum</th><th>Suma</th><th>Mena</th><th>Meno</th><th>IBAN</th><th>Memo</th><th>VS</th><th>Poznámka</th></tr></thead>
+      <tbody>${data.map(c => {
+        const amt = c.trnamt || 0;
+        return `<tr onclick="Views.credits.openDetail(${c.id})">
+          <td class="mono">${c.id}</td>
+          <td><span class="tag ${c.trntype==='CREDIT'?'tag-green':'tag-red'}">${esc(c.trntype||'')}</span></td>
+          <td>${fmtBankDate(c.dtposted)}</td>
+          <td class="cur ${amt>=0?'cur-pos':'cur-neg'}">${fmt_eur(amt)}</td>
+          <td>${esc(c.currency||'')}</td>
+          <td class="td-truncate">${esc(c.name||'')}</td>
+          <td class="mono" style="font-size:11px">${esc(c.iban4||c.iban||'')}</td>
+          <td class="td-truncate">${esc(c.memo||'')}</td>
+          <td class="mono">${esc(c.trnvasym||'')}</td>
+          <td>${esc(c.poznamka||'')}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>
+      <div class="pagination">
+        <span>${data.length} pohybov | Suma: <strong>${fmt_eur(data.reduce((a,c)=>a+(c.trnamt||0),0))}</strong></span>
+      </div>
+    </div>`;
+  },
+
+  openDetail(id) {
+    const c = State.credits.data.find(x => x.id === id) || {};
+    const body = `<div class="detail-grid">
+      ${dfield('Typ',c.trntype)} ${dfield('Dátum',fmtBankDate(c.dtposted))}
+      ${dfield('Suma',fmt_eur(c.trnamt))} ${dfield('Mena',c.currency)}
+      ${dfield('Meno',c.name,'full')}
+      ${dfield('IBAN odosielateľa',c.iban4||c.iban,'full')}
+      ${dfield('VS',c.trnvasym)} ${dfield('KS',c.trncosym)}
+      ${dfield('Reference E2E',c.reference_e2e,'full')}
+      ${dfield('Memo',c.memo,'full')}
+      ${dfield('Poznámka',c.poznamka,'full')}
+    </div>`;
+    App.openDetail(`Pohyb #${c.id}`, body, () => this.openEdit(id));
+  },
+
+  openAdd() { this.openForm(null); },
+  openEdit(id) { const c = State.credits.data.find(x => x.id === id); if (c) this.openForm(c); },
+
+  openForm(c) {
+    const v = k => esc(c?.[k] ?? '');
+    const body = `<div class="form-grid">
+      <div class="field"><label>Typ (CREDIT/DEBIT)</label><input id="fcr-trntype" value="${v('trntype')}"></div>
+      <div class="field"><label>Suma</label><input type="number" step="0.01" id="fcr-trnamt" value="${c?.trnamt??''}"></div>
+      <div class="field"><label>Mena</label><input id="fcr-currency" value="${v('currency')||'EUR'}"></div>
+      <div class="field"><label>Dátum (YYYYMMDD)</label><input id="fcr-dtposted" value="${c?.dtposted??''}"></div>
+      <div class="field form-full"><label>Meno</label><input id="fcr-name" value="${v('name')}"></div>
+      <div class="field form-full"><label>IBAN protistrany</label><input id="fcr-iban4" value="${v('iban4')}"></div>
+      <div class="field"><label>VS</label><input id="fcr-trnvasym" value="${v('trnvasym')}"></div>
+      <div class="field"><label>KS</label><input id="fcr-trncosym" value="${v('trncosym')}"></div>
+      <div class="field form-full"><label>Memo</label><input id="fcr-memo" value="${v('memo')}"></div>
+      <div class="field form-full"><label>Reference E2E</label><input id="fcr-reference_e2e" value="${v('reference_e2e')}"></div>
+      <div class="field form-full"><label>Poznámka</label><input id="fcr-poznamka" value="${v('poznamka')}"></div>
+    </div>`;
+    App.openModal(c ? 'Upraviť pohyb' : 'Nový bankový pohyb', body, c?.id, !!c);
+  },
+
+  async save() {
+    const text = ['trntype','currency','name','iban4','trnvasym','memo','reference_e2e','poznamka'];
+    const nums = ['trnamt','dtposted','trncosym'];
+    const data = {};
+    text.forEach(f => { data[f] = document.getElementById('fcr-'+f)?.value || null; });
+    nums.forEach(f => { const e = document.getElementById('fcr-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value) : null; });
+    if (State.editId) await API.put('/api/credits/' + State.editId, data);
+    else await API.post('/api/credits', data);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť pohyb?')) return;
+    await API.del('/api/credits/' + State.editId);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+};
+
+// ─── IMPOSITION ──────────────────────────────────────────────────────────────
+Views.imposition = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = `
+    <div class="filter-bar">
+      <input type="search" id="imp-format" placeholder="Formát (A4, A5...)">
+      <input type="search" id="imp-vazba" placeholder="Typ väzby...">
+    </div>
+    <div id="imp-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    ['imp-format','imp-vazba'].forEach(id => {
+      document.getElementById(id)?.addEventListener('input', () => this.load());
+    });
+    await this.load();
+  },
+
+  async load() {
+    const params = new URLSearchParams({ limit: 200 });
+    const f = document.getElementById('imp-format')?.value;
+    const v = document.getElementById('imp-vazba')?.value;
+    if (f) params.set('format', f);
+    if (v) params.set('vazba_typ', v);
+    const data = await API.get('/api/imposition?' + params);
+    State.imposition.data = data;
+    const wrap = document.getElementById('imp-table-wrap');
+    if (!wrap) return;
+    if (!data.length) { wrap.innerHTML = '<div class="empty">Žiadne záznamy</div>'; return; }
+    wrap.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Formát</th><th>Väzba</th><th>Náklad</th><th>Strán</th><th>JPH</th><th>CPH</th><th>CPK</th><th>Typ</th></tr></thead>
+      <tbody>${data.map(d => `<tr onclick="Views.imposition.openDetail(${d.id})">
+        <td class="mono">${d.id}</td>
+        <td>${esc(d.format||'')}</td>
+        <td>${esc(d.vazba_typ||'')}</td>
+        <td>${d.naklad??''}</td>
+        <td>${d.stran??''}</td>
+        <td class="cur">${fmt_eur(d.vn_jph)}</td>
+        <td class="cur">${fmt_eur(d.vn_cph)}</td>
+        <td class="cur">${fmt_eur(d.vn_cpk)}</td>
+        <td>${esc(d.typ_vyradenia||'')}</td>
+      </tr>`).join('')}
+      </tbody></table>
+      <div class="pagination"><span>${data.length} záznamov</span></div>
+    </div>`;
+  },
+
+  openDetail(id) {
+    const d = State.imposition.data.find(x => x.id === id) || {};
+    const body = `
+      <div class="detail-grid">
+        ${dfield('ID',d.id)} ${dfield('Formát',d.format)}
+        ${dfield('Typ väzby',d.vazba_typ)} ${dfield('Náklad',d.naklad)}
+        ${dfield('Strán',d.stran)} ${dfield('Typ vyradenia',d.typ_vyradenia)}
+      </div>
+      <div class="detail-section"><h4>Ceny</h4><div class="detail-grid">
+        ${dfield('JPH',fmt_eur(d.vn_jph))} ${dfield('CPH',fmt_eur(d.vn_cph))}
+        ${dfield('JPK CB→CB',d.vn_jpk_cb_na_cb)} ${dfield('JPK FAR',d.vn_jpk_far)}
+        ${dfield('JPK FAR znížený',d.vn_jpk_far_znizeny)} ${dfield('CPK CB→CB',d.vn_cpk_cb_na_cb)}
+        ${dfield('CPK FAR',d.vn_cpk_far)} ${dfield('CPK',d.vn_cpk)}
+        ${dfield('Kliky spolu V',fmt_eur(d.vn_kliky_spolu_v))}
+      </div></div>
+      ${d.pdftk_komplet ? `<div class="detail-section"><h4>PDFTK Komplet</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.pdftk_komplet)}</pre></div>` : ''}
+      ${d.ako_vkladat ? `<div class="detail-section"><h4>Ako vkladať</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.ako_vkladat)}</pre></div>` : ''}
+      ${d.statistika ? `<div class="detail-section"><h4>Štatistika</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.statistika)}</pre></div>` : ''}
+    `;
+    App.openDetail(`Vyradovanie #${d.id} – ${d.format||''} ${d.vazba_typ||''}`, body, () => {});
+  },
+
+  openAdd() { this.openForm(null); },
+  openForm(d) {
+    const v = k => esc(d?.[k] ?? '');
+    const body = `<div class="form-grid">
+      <div class="field"><label>Formát</label><input id="fd-format" value="${v('format')}"></div>
+      <div class="field"><label>Väzba</label><input id="fd-vazba_typ" value="${v('vazba_typ')}"></div>
+      <div class="field"><label>Náklad</label><input type="number" id="fd-naklad" value="${d?.naklad??''}"></div>
+      <div class="field"><label>Strán</label><input type="number" id="fd-stran" value="${d?.stran??''}"></div>
+      <div class="field"><label>JPH</label><input type="number" step="0.01" id="fd-vn_jph" value="${d?.vn_jph??''}"></div>
+      <div class="field"><label>CPH</label><input type="number" step="0.01" id="fd-vn_cph" value="${d?.vn_cph??''}"></div>
+      <div class="field"><label>Typ vyradenia</label><input id="fd-typ_vyradenia" value="${v('typ_vyradenia')}"></div>
+      <div class="field form-full"><label>Retazec špecifikácie</label><input id="fd-retazec_specifikacie" value="${v('retazec_specifikacie')}"></div>
+    </div>`;
+    App.openModal(d ? `Upraviť vyradovanie #${d.id}` : 'Nový záznam vyradovania', body, d?.id, !!d);
+  },
+
+  async save() {
+    const text = ['format','vazba_typ','typ_vyradenia','retazec_specifikacie'];
+    const nums = ['naklad','stran','vn_jph','vn_cph'];
+    const data = {};
+    text.forEach(f => { data[f] = document.getElementById('fd-'+f)?.value || null; });
+    nums.forEach(f => { const e = document.getElementById('fd-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value) : null; });
+    if (State.editId) await API.put('/api/imposition/' + State.editId, data);
+    else await API.post('/api/imposition', data);
+    App.closeModal();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť záznam?')) return;
+    await API.del('/api/imposition/' + State.editId);
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+};
+
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+Views.settings = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = '<div class="loading">Načítavam...</div>';
+    const lk = State.lookups;
+    cont.innerHTML = `
+      ${this.section('Stavy projektov', lk.stavy_projektov||[], 'stavy', 'nazov')}
+      ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
+      ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
+      ${this.section('Typy odmien', lk.typy_odmeny||[], 'typy-odmeny', 'nazov')}
+      ${this.section('Podfiltre projektov', lk.podfilter_projektov||[], 'podfilter', 'nazov')}
+      ${this.sectionVazby(lk.vazby||[])}
+      ${this.sectionDPH(lk.sadzby_dph||[])}
+    `;
+    this.bindEvents();
+  },
+
+  section(title, rows, endpoint, field) {
+    const rowsHtml = rows.map(r => `
+      <div class="settings-row" data-id="${r.id}" data-endpoint="${endpoint}" data-field="${field}">
+        <input class="field input" value="${esc(r[field]||'')}" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px">
+        <button class="btn-icon" onclick="Views.settings.saveRow(this)">💾</button>
+        <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
+      </div>`).join('');
+    return `<div class="settings-section">
+      <div class="settings-section-header">
+        <h3>${title}</h3>
+        <button class="btn btn-sm btn-primary" onclick="Views.settings.addRow('${endpoint}','${field}',this)">+ Pridať</button>
+      </div>
+      <div class="settings-section-body" id="sb-${endpoint}">${rowsHtml}</div>
+    </div>`;
+  },
+
+  sectionVazby(rows) {
+    const rowsHtml = rows.map(r => `
+      <div class="settings-row" data-id="${r.id}" data-endpoint="vazby">
+        <input placeholder="Kód" value="${esc(r.vazba||'')}" style="width:100px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fv-vazba">
+        <input placeholder="Popis" value="${esc(r.popis||'')}" style="flex:1;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fv-popis">
+        <button class="btn-icon" onclick="Views.settings.saveVazba(this)">💾</button>
+        <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
+      </div>`).join('');
+    return `<div class="settings-section">
+      <div class="settings-section-header"><h3>Väzby</h3>
+        <button class="btn btn-sm btn-primary" onclick="Views.settings.addVazba(this)">+ Pridať</button>
+      </div>
+      <div class="settings-section-body" id="sb-vazby">${rowsHtml}</div>
+    </div>`;
+  },
+
+  sectionDPH(rows) {
+    const rowsHtml = rows.map(r => `
+      <div class="settings-row" data-id="${r.id}" data-endpoint="sadzby-dph">
+        <input type="number" step="0.01" value="${r.sadzba??''}" style="width:100px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fv-sadzba">
+        <span style="font-size:13px;color:var(--text-muted)">(${((r.sadzba||0)*100).toFixed(0)}%)</span>
+        <button class="btn-icon" onclick="Views.settings.saveDPH(this)">💾</button>
+        <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
+      </div>`).join('');
+    return `<div class="settings-section">
+      <div class="settings-section-header"><h3>Sadzby DPH</h3></div>
+      <div class="settings-section-body" id="sb-sadzby-dph">${rowsHtml}</div>
+    </div>`;
+  },
+
+  bindEvents() {},
+
+  async saveRow(btn) {
+    const row = btn.closest('.settings-row');
+    const id = row.dataset.id;
+    const endpoint = row.dataset.endpoint;
+    const field = row.dataset.field;
+    const val = row.querySelector('input').value;
+    await API.put(`/api/${endpoint}/${id}`, { [field]: val });
+    await this.refreshLookups();
+  },
+
+  async saveVazba(btn) {
+    const row = btn.closest('.settings-row');
+    const id = row.dataset.id;
+    const vazba = row.querySelector('.fv-vazba').value;
+    const popis = row.querySelector('.fv-popis').value;
+    await API.put(`/api/vazby/${id}`, { vazba, popis });
+    await this.refreshLookups();
+  },
+
+  async saveDPH(btn) {
+    const row = btn.closest('.settings-row');
+    const id = row.dataset.id;
+    const sadzba = parseFloat(row.querySelector('.fv-sadzba').value) || 0;
+    await API.put(`/api/sadzby-dph/${id}`, { sadzba });
+    await this.refreshLookups();
+  },
+
+  async deleteRow(btn) {
+    if (!confirm('Odstraniť?')) return;
+    const row = btn.closest('.settings-row');
+    await API.del(`/api/${row.dataset.endpoint}/${row.dataset.id}`);
+    row.remove();
+    await this.refreshLookups();
+  },
+
+  async addRow(endpoint, field, btn) {
+    const val = prompt('Nová hodnota:');
+    if (!val) return;
+    await API.post(`/api/${endpoint}`, { [field]: val });
+    await this.refreshLookups();
+    this.render();
+  },
+
+  async addVazba(btn) {
+    const vazba = prompt('Kód väzby:');
+    if (!vazba) return;
+    const popis = prompt('Popis väzby:') || vazba;
+    await API.post('/api/vazby', { vazba, popis });
+    await this.refreshLookups();
+    this.render();
+  },
+
+  async refreshLookups() {
+    State.lookups = await API.get('/api/lookups');
+  },
+};
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function dfield(label, val, span) {
+  const spanClass = span === 'full' ? ' style="grid-column:1/-1"' : '';
+  return `<div class="detail-field"${spanClass}><div class="lbl">${esc(label)}</div><div class="val">${val ?? '—'}</div></div>`;
+}
+function pflag(label, val) {
+  return `<span class="tag ${val?'tag-blue':''}">${val?'✓':''} ${esc(label)}</span>`;
+}
+function projFlags(p) {
+  const on = [];
+  if (p.projekt_expedovat) on.push('<span class="flag flag-exp on" title="Expedovať">📦</span>');
+  if (p.projekt_sledovany) on.push('<span class="flag flag-sled on" title="Sledovaný">👁</span>');
+  if (p.projekt_fakturovany) on.push('<span class="flag flag-fak on" title="Fakturovaný">🧾</span>');
+  if (p.projekt_uhradeny) on.push('<span class="flag flag-uhr on" title="Uhradený">✅</span>');
+  if (p.projekt_kreditny) on.push('<span class="tag tag-blue" title="Kreditný">K</span>');
+  if (p.projekt_zberny) on.push('<span class="tag tag-orange" title="Zberný">Z</span>');
+  if (p.projekt_kniha) on.push('<span class="tag tag-purple" title="Kniha">📗</span>');
+  return `<div class="flags">${on.join('')}</div>`;
+}
+function itemsTable(items) {
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>ID</th><th>Popis</th><th>MJ</th><th>Počet</th><th>Cena</th><th>s DPH</th><th>Status</th><th>Fak.</th></tr></thead>
+    <tbody>${items.map(i => `<tr>
+      <td class="mono">${i.id}</td>
+      <td class="td-truncate">${esc(i.popis||'')}</td>
+      <td>${esc(i.mj||'')}</td>
+      <td>${i.pocet??''}</td>
+      <td class="cur">${fmt_eur(i.cena)}</td>
+      <td class="cur">${fmt_eur(i.cena_s_dph)}</td>
+      <td>${statusBadge(i.status)}</td>
+      <td>${i.fakturovane?'✅':i.fakturovat?'○':''}</td>
+    </tr>`).join('')}
+    </tbody></table></div>`;
+}
+function cbox(id, label, checked) {
+  return `<label class="checkbox-item"><input type="checkbox" id="${id}" ${checked}> ${esc(label)}</label>`;
+}
+function chipLabel(k) {
+  const m = {kreditny:'Kreditné',zberny:'Zberné',kniha:'Kniha',cp:'CP',oznaceny:'Označené',
+    cakajuci:'Čakajúce',bezny:'Bežné',hotovo:'Hotovo',expedovat:'Expedovať',sledovany:'Sledované'};
+  return m[k] || k;
+}
+function isoDate(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d)) return '';
+  return d.toISOString().slice(0, 10);
+}
+function fmtBankDate(v) {
+  if (!v) return '—';
+  const s = String(Math.floor(v));
+  if (s.length === 8) return `${s.slice(6,8)}.${s.slice(4,6)}.${s.slice(0,4)}`;
+  return s;
+}
+function calcItemPrice() {
+  const pocet = parseFloat(document.getElementById('fi-pocet')?.value) || 0;
+  const jc = parseFloat(document.getElementById('fi-jc')?.value) || 0;
+  const zlava = parseFloat(document.getElementById('fi-zlava')?.value) || 0;
+  const dph = parseFloat(document.getElementById('fi-sadzba_dph')?.value) || 0;
+  const cena = pocet * jc * (1 - zlava);
+  const cena_dph = cena * (1 + dph);
+  const cf = document.getElementById('fi-cena');
+  const cdf = document.getElementById('fi-cena_s_dph');
+  if (cf) cf.value = cena.toFixed(4);
+  if (cdf) cdf.value = cena_dph.toFixed(4);
+}
+function switchTab(el, targetId) {
+  const container = el.closest('.modal-body, .detail-body');
+  if (!container) return;
+  container.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const tabIds = ['tab-basic','tab-items','tab-notes','tab-log',
+                   'pf-basic','pf-finance','pf-flags','pf-notes',
+                   'if-basic','if-tlac','if-expedia'];
+  tabIds.forEach(id => {
+    const el2 = document.getElementById(id);
+    if (el2) el2.style.display = 'none';
+  });
+  const target = document.getElementById(targetId);
+  if (target) target.style.display = '';
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.App = App;
+window.Views = Views;
+window.switchTab = switchTab;
+window.calcItemPrice = calcItemPrice;
+document.addEventListener('DOMContentLoaded', () => App.init());
