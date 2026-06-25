@@ -3,3 +3,6 @@ uvicorn[standard]
 sqlalchemy
 aiosqlite
 python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+pdfplumber
