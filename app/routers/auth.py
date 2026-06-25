@@ -64,7 +64,11 @@ async def get_admin_user(user: User = Depends(get_current_user)) -> User:
 
 
 @router.post("/login")
-async def login(data: dict, response: Response, db: AsyncSession = Depends(get_db)):
+async def login(data: dict, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    from app.main import check_rate_limit
+    ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(ip):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Príliš veľa pokusov. Skúste znova za minútu.")
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
     result = await db.execute(select(User).where(User.username == username))
@@ -76,7 +80,11 @@ async def login(data: dict, response: Response, db: AsyncSession = Depends(get_d
     if not verify_password(password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Nesprávne meno alebo heslo")
     token = create_token(user.id, user.username)
-    response.set_cookie("eq_token", token, httponly=True, samesite="lax", max_age=ACCESS_TOKEN_EXPIRE_HOURS * 3600)
+    response.set_cookie(
+        "eq_token", token,
+        httponly=True, samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
+    )
     return {"ok": True, "user": {"id": user.id, "username": user.username, "plne_meno": user.plne_meno, "is_admin": user.is_admin}}
 
 

@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Depends, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -10,7 +11,43 @@ from app.models import Project, Invoice, Customer
 from app.routers import projects, items, invoices, customers, credits, imposition, lookups
 from app.routers import firmy, kontakty, naklady, iqk, bank, auth
 from app.database import AsyncSessionLocal
-import csv, io
+import csv, io, time
+from collections import defaultdict
+
+# ── Simple in-memory rate limiter for login ───────────────────────────────────
+_login_attempts: dict = defaultdict(list)
+_LOGIN_WINDOW = 60   # seconds
+_LOGIN_MAX = 10      # max attempts per window per IP
+
+def check_rate_limit(ip: str) -> bool:
+    now = time.time()
+    attempts = _login_attempts[ip]
+    _login_attempts[ip] = [t for t in attempts if now - t < _LOGIN_WINDOW]
+    if len(_login_attempts[ip]) >= _LOGIN_MAX:
+        return False
+    _login_attempts[ip].append(now)
+    return True
+
+
+# ── Auth guard middleware: protect all /api/* except /api/auth/* ──────────────
+_PUBLIC_PREFIXES = ("/api/auth/login", "/api/auth/logout", "/api/auth/me")
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path.startswith("/api/"):
+            if not any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+                token = request.cookies.get("eq_token") or \
+                    request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+                if not token or not auth.decode_token(token):
+                    return JSONResponse({"detail": "Nie ste prihlásený"}, status_code=401)
+        response = await call_next(request)
+        # Security headers on every response
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
 
 
 @asynccontextmanager
@@ -23,12 +60,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="EQ Projekty", lifespan=lifespan)
 
+# CORS: restrict to same origin in production (no wildcard)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+app.add_middleware(AuthMiddleware)
 
 app.include_router(projects.router)
 app.include_router(items.router)
@@ -60,7 +100,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/api/dashboard")
-async def dashboard(db: AsyncSession = Depends(get_db)):
+async def dashboard(request: Request, db: AsyncSession = Depends(get_db), _user=Depends(auth.get_current_user)):
     proj_total = (await db.execute(select(func.count()).select_from(Project))).scalar()
     proj_by_stav = (await db.execute(
         select(Project.stav, func.count()).group_by(Project.stav)
@@ -88,7 +128,7 @@ async def dashboard(db: AsyncSession = Depends(get_db)):
 
 
 @app.get("/api/export/projects")
-async def export_projects(db: AsyncSession = Depends(get_db)):
+async def export_projects(db: AsyncSession = Depends(get_db), _user=Depends(auth.get_current_user)):
     result = await db.execute(select(Project).order_by(Project.id.desc()))
     projects_list = result.scalars().all()
     output = io.StringIO()
@@ -104,7 +144,7 @@ async def export_projects(db: AsyncSession = Depends(get_db)):
 
 
 @app.get("/api/export/invoices")
-async def export_invoices(db: AsyncSession = Depends(get_db)):
+async def export_invoices(db: AsyncSession = Depends(get_db), _user=Depends(auth.get_current_user)):
     result = await db.execute(select(Invoice).order_by(Invoice.datum_vystavenia.desc()))
     invs = result.scalars().all()
     output = io.StringIO()
