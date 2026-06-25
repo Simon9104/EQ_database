@@ -1562,7 +1562,14 @@ Views.imposition = {
         ${dfield('CPK FAR',d.vn_cpk_far)} ${dfield('CPK',d.vn_cpk)}
         ${dfield('Kliky spolu V',fmt_eur(d.vn_kliky_spolu_v))}
       </div></div>
+      <div class="detail-section" style="display:flex;justify-content:space-between;align-items:center">
+        <h4 style="margin:0">PDFTK Skripty</h4>
+        <button class="btn btn-sm btn-primary" onclick="Views.imposition.generate(${d.id})">⚙ Generovať</button>
+      </div>
       ${d.pdftk_komplet ? `<div class="detail-section"><h4>PDFTK Komplet</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.pdftk_komplet)}</pre></div>` : ''}
+      ${d.pdftk_komplet_kratky ? `<div class="detail-section"><h4>PDFTK Komplet (krátky)</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.pdftk_komplet_kratky)}</pre></div>` : ''}
+      ${d.pdftk_cb_tlac ? `<div class="detail-section"><h4>PDFTK CB tlač</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.pdftk_cb_tlac)}</pre></div>` : ''}
+      ${d.pdftk_vkladacky ? `<div class="detail-section"><h4>PDFTK Vkladačky</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.pdftk_vkladacky)}</pre></div>` : ''}
       ${d.ako_vkladat ? `<div class="detail-section"><h4>Ako vkladať</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.ako_vkladat)}</pre></div>` : ''}
       ${d.statistika ? `<div class="detail-section"><h4>Štatistika</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.statistika)}</pre></div>` : ''}
     `;
@@ -1577,18 +1584,24 @@ Views.imposition = {
       <div class="field"><label>Formát</label><input id="fd-format" value="${v('format')}"></div>
       <div class="field"><label>Väzba</label><input id="fd-vazba_typ" value="${v('vazba_typ')}"></div>
       <div class="field"><label>Náklad</label><input type="number" id="fd-naklad" value="${d?.naklad??''}"></div>
-      <div class="field"><label>Strán</label><input type="number" id="fd-stran" value="${d?.stran??''}"></div>
+      <div class="field"><label>Strán celkom</label><input type="number" id="fd-stran" value="${d?.stran??''}"></div>
+      <div class="field"><label>Strán FAR</label><input type="number" id="fd-pocet_stran_far" value="${d?.pocet_stran_far??''}"></div>
+      <div class="field"><label>Počet sád</label><input type="number" id="fd-pocet_sad" value="${d?.pocet_sad??''}"></div>
+      <div class="field"><label>Modulo</label><input type="number" step="0.01" id="fd-modulo" value="${d?.modulo??''}"></div>
       <div class="field"><label>JPH</label><input type="number" step="0.01" id="fd-vn_jph" value="${d?.vn_jph??''}"></div>
       <div class="field"><label>CPH</label><input type="number" step="0.01" id="fd-vn_cph" value="${d?.vn_cph??''}"></div>
       <div class="field"><label>Typ vyradenia</label><input id="fd-typ_vyradenia" value="${v('typ_vyradenia')}"></div>
+      <div class="field form-full"><label>ČB strany (napr. 1,3-9,12)</label><input id="fd-cb_strany" value="${v('cb_strany')}"></div>
+      <div class="field form-full"><label>ČB strany v dokumente (napr. 2-252)</label><input id="fd-cb_strany_v_dokumente" value="${v('cb_strany_v_dokumente')}"></div>
+      <div class="field form-full"><label>Na FAR (vkladačky)</label><textarea id="fd-na_far" rows="3" style="width:100%;font-family:monospace;font-size:12px">${v('na_far')}</textarea></div>
       <div class="field form-full"><label>Retazec špecifikácie</label><input id="fd-retazec_specifikacie" value="${v('retazec_specifikacie')}"></div>
     </div>`;
     App.openModal(d ? `Upraviť vyradovanie #${d.id}` : 'Nový záznam vyradovania', body, d?.id, !!d);
   },
 
   async save() {
-    const text = ['format','vazba_typ','typ_vyradenia','retazec_specifikacie'];
-    const nums = ['naklad','stran','vn_jph','vn_cph'];
+    const text = ['format','vazba_typ','typ_vyradenia','retazec_specifikacie','cb_strany','cb_strany_v_dokumente','na_far'];
+    const nums = ['naklad','stran','pocet_stran_far','pocet_sad','modulo','vn_jph','vn_cph'];
     const data = {};
     text.forEach(f => { data[f] = document.getElementById('fd-'+f)?.value || null; });
     nums.forEach(f => { const e = document.getElementById('fd-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value) : null; });
@@ -1604,6 +1617,20 @@ Views.imposition = {
     App.closeModal();
     App.closeDetail();
     await this.load();
+  },
+
+  async generate(id) {
+    const btn = document.querySelector('[onclick*="generate"]');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generujem...'; }
+    try {
+      const updated = await API.post(`/api/imposition/${id}/generate`, {});
+      // Refresh local state
+      const idx = State.imposition.data.findIndex(x => x.id === id);
+      if (idx >= 0) State.imposition.data[idx] = updated;
+      this.openDetail(id);
+    } catch(e) {
+      alert('Chyba pri generovaní: ' + (e.message || e));
+    }
   },
 };
 
