@@ -1784,9 +1784,9 @@ Views.settings = {
     const cont = document.getElementById('content');
     cont.innerHTML = '<div class="loading">Načítavam...</div>';
     const lk = State.lookups;
-    const usersHtml = await this.sectionUsers();
-    const firemneHtml = tab === 'firma' ? await this.sectionFiremneUdaje() : '';
     const tab = this._tab;
+    const usersHtml = tab === 'pouzivatelia' ? await this.sectionUsers() : '';
+    const firemneHtml = tab === 'firma' ? await this.sectionFiremneUdaje() : '';
     const tabBtn = (id, label) =>
       `<button class="tab-btn${tab===id?' active':''}" onclick="Views.settings._switchTab('${id}')">${label}</button>`;
     cont.innerHTML = `
