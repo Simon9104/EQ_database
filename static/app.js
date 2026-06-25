@@ -1684,22 +1684,55 @@ Views.settings = {
     }
   },
 
+  _tab: 'projekty',
+
   async render() {
     const cont = document.getElementById('content');
     cont.innerHTML = '<div class="loading">Načítavam...</div>';
     const lk = State.lookups;
+    const usersHtml = await this.sectionUsers();
+    const tab = this._tab;
+    const tabBtn = (id, label) =>
+      `<button class="tab-btn${tab===id?' active':''}" onclick="Views.settings._switchTab('${id}')">${label}</button>`;
     cont.innerHTML = `
-      ${this.section('Stavy projektov', lk.stavy_projektov||[], 'stavy', 'nazov')}
-      ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
-      ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
-      ${this.section('Typy odmien', lk.typy_odmeny||[], 'typy-odmeny', 'nazov')}
-      ${this.section('Typy nákladov', lk.typy_nakladov||[], 'typy-nakladov', 'nazov')}
-      ${this.section('Podfiltre projektov', lk.podfilter_projektov||[], 'podfilter', 'nazov')}
-      ${this.sectionVazby(lk.vazby||[])}
-      ${this.sectionDPH(lk.sadzby_dph||[])}
-      ${this.sectionObalkaCeny(lk.obalka_ceny||[])}
-    `;
+      <div class="tab-bar" style="margin-bottom:0;border-bottom:2px solid var(--border);padding:0 16px">
+        ${tabBtn('projekty','📁 Projekty')}
+        ${tabBtn('tlac','🖨 Tlač &amp; Výroba')}
+        ${tabBtn('financie','💶 Financie')}
+        ${tabBtn('iqk','📚 IQK')}
+        ${tabBtn('pouzivatelia','👤 Používatelia')}
+      </div>
+      <div id="settings-tab-content" style="padding:0">
+        ${tab==='projekty' ? `
+          ${this.section('Stavy projektov', lk.stavy_projektov||[], 'stavy', 'nazov')}
+          ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
+          ${this.section('Podfiltre projektov', lk.podfilter_projektov||[], 'podfilter', 'nazov')}
+        ` : ''}
+        ${tab==='tlac' ? `
+          ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
+          ${this.section('Typy nákladov', lk.typy_nakladov||[], 'typy-nakladov', 'nazov')}
+          ${this.sectionVazby(lk.vazby||[])}
+          ${this.sectionPovrchovaUprava(lk.povrchova_uprava||[])}
+        ` : ''}
+        ${tab==='financie' ? `
+          ${this.sectionDPH(lk.sadzby_dph||[])}
+          ${this.sectionObalkaCeny(lk.obalka_ceny||[])}
+        ` : ''}
+        ${tab==='iqk' ? `
+          ${this.section('Typy odmien', lk.typy_odmeny||[], 'typy-odmeny', 'nazov')}
+          ${this.sectionJazykyIQK(lk.jazyky_iqk||[])}
+        ` : ''}
+        ${tab==='pouzivatelia' ? `
+          ${usersHtml}
+          ${this.sectionChangePassword()}
+        ` : ''}
+      </div>`;
     this.bindEvents();
+  },
+
+  _switchTab(id) {
+    this._tab = id;
+    this.render();
   },
 
   section(title, rows, endpoint, field) {
@@ -2124,30 +2157,6 @@ Views.iqk = {
 };
 
 
-// Patch Settings to add PovrchovaUprava and JazykyIQK sections
-const _origSettingsRender = Views.settings.render.bind(Views.settings);
-Views.settings.render = async function() {
-  const cont = document.getElementById('content');
-  cont.innerHTML = '<div class="loading">Načítavam...</div>';
-  const lk = State.lookups;
-  const usersHtml = await this.sectionUsers();
-  cont.innerHTML = `
-    ${usersHtml}
-    ${this.sectionChangePassword()}
-    ${this.section('Stavy projektov', lk.stavy_projektov||[], 'stavy', 'nazov')}
-    ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
-    ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
-    ${this.section('Typy odmien', lk.typy_odmeny||[], 'typy-odmeny', 'nazov')}
-    ${this.section('Typy nákladov', lk.typy_nakladov||[], 'typy-nakladov', 'nazov')}
-    ${this.section('Podfiltre projektov', lk.podfilter_projektov||[], 'podfilter', 'nazov')}
-    ${this.sectionVazby(lk.vazby||[])}
-    ${this.sectionPovrchovaUprava(lk.povrchova_uprava||[])}
-    ${this.sectionDPH(lk.sadzby_dph||[])}
-    ${this.sectionObalkaCeny(lk.obalka_ceny||[])}
-    ${this.sectionJazykyIQK(lk.jazyky_iqk||[])}
-  `;
-  this.bindEvents();
-};
 
 Views.settings.sectionPovrchovaUprava = function(rows) {
   const rowsHtml = rows.map(r => `
