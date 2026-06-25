@@ -1566,10 +1566,11 @@ Views.imposition = {
       ${d.ako_vkladat ? `<div class="detail-section"><h4>Ako vkladať</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.ako_vkladat)}</pre></div>` : ''}
       ${d.statistika ? `<div class="detail-section"><h4>Štatistika</h4><pre style="font-size:11px;white-space:pre-wrap;background:#f8fafc;padding:8px;border-radius:4px">${esc(d.statistika)}</pre></div>` : ''}
     `;
-    App.openDetail(`Vyradovanie #${d.id} – ${d.format||''} ${d.vazba_typ||''}`, body, () => {});
+    App.openDetail(`Vyradovanie #${d.id} – ${d.format||''} ${d.vazba_typ||''}`, body, () => this.openEdit(d.id));
   },
 
   openAdd() { this.openForm(null); },
+  openEdit(id) { const d = State.imposition.data.find(x => x.id === id); if (d) this.openForm(d); },
   openForm(d) {
     const v = k => esc(d?.[k] ?? '');
     const body = `<div class="form-grid">
