@@ -2,22 +2,18 @@
 
 // ── API ─────────────────────────────────────────────────────────────────────
 const API = {
-  async get(url) {
-    const r = await fetch(url);
+  async _handle(r) {
+    if (r.status === 401) { window.location.href = '/login'; return null; }
     return r.json();
   },
+  async get(url) { return this._handle(await fetch(url)); },
   async post(url, data) {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    return r.json();
+    return this._handle(await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
   },
   async put(url, data) {
-    const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    return r.json();
+    return this._handle(await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
   },
-  async del(url) {
-    const r = await fetch(url, { method: 'DELETE' });
-    return r.json();
-  },
+  async del(url) { return this._handle(await fetch(url, { method: 'DELETE' })); },
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -90,9 +86,16 @@ const State = {
 // ── App ──────────────────────────────────────────────────────────────────────
 const App = {
   async init() {
+    // Load current user from auth
+    const me = await API.get('/api/auth/me');
+    if (!me) return; // redirected to login
+    State.currentUser = me;
+    const cuEl = document.getElementById('current-user');
+    if (cuEl) {
+      cuEl.innerHTML = `<span style="cursor:pointer" title="Odhlásiť sa" onclick="App.logout()">👤 ${esc(me.plne_meno || me.username)}</span>`;
+    }
+
     State.lookups = await API.get('/api/lookups');
-    const user = State.lookups.users?.[0];
-    if (user) document.getElementById('current-user').textContent = user.plne_meno || user.username || '';
 
     document.querySelectorAll('#sidebar nav a').forEach(a => {
       a.addEventListener('click', () => {
@@ -184,6 +187,12 @@ const App = {
     document.getElementById('detail-body').innerHTML = bodyHtml;
     document.getElementById('detail-edit-btn').onclick = editFn || (() => {});
     document.getElementById('detail-panel').classList.add('open');
+  },
+
+  async logout() {
+    if (!confirm('Odhlásiť sa?')) return;
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
   },
 };
 
@@ -1202,16 +1211,188 @@ Views.credits = {
   async render() {
     const cont = document.getElementById('content');
     cont.innerHTML = `
-    <div class="filter-bar">
-      <input type="search" id="cr-search" placeholder="Hľadať meno / memo...">
-      <select id="cr-trntype"><option value="">Všetky typy</option><option>CREDIT</option><option>DEBIT</option></select>
+    <div class="tab-bar" style="margin-bottom:12px">
+      <button class="tab-btn active" onclick="Views.credits.switchTab('pohyby',this)">Pohyby</button>
+      <button class="tab-btn" onclick="Views.credits.switchTab('import',this)">Import výpisu</button>
+      <button class="tab-btn" onclick="Views.credits.switchTab('parovanie',this)">Párovanie faktúr</button>
     </div>
-    <div id="cr-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    <div id="cr-tab-pohyby">
+      <div class="filter-bar">
+        <input type="search" id="cr-search" placeholder="Hľadať meno / memo...">
+        <select id="cr-trntype"><option value="">Všetky typy</option><option>CREDIT</option><option>DEBIT</option></select>
+      </div>
+      <div id="cr-table-wrap"><div class="loading">Načítavam...</div></div>
+    </div>
+    <div id="cr-tab-import" style="display:none">
+      <div class="card" style="max-width:600px">
+        <h3 style="margin-top:0">Import bankového výpisu</h3>
+        <div class="form-grid">
+          <div class="field form-full">
+            <label>Súbor OFX / QFX (odporúčané)</label>
+            <input type="file" id="cr-file-ofx" accept=".ofx,.qfx,.txt">
+            <small>Export OFX z internet bankingu (Tatra banka, VÚB, ČSOB, Sporiteľňa)</small>
+          </div>
+          <div class="field form-full" style="margin-top:8px">
+            <button class="btn btn-primary" onclick="Views.credits.importOFX()">Importovať OFX</button>
+          </div>
+          <div class="field form-full" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+            <label>Súbor PDF (bankový výpis)</label>
+            <input type="file" id="cr-file-pdf" accept=".pdf">
+            <small>PDF výpis zo slovenských bánk – automatická extrakcia transakcií</small>
+          </div>
+          <div class="field form-full" style="margin-top:8px">
+            <button class="btn btn-primary" onclick="Views.credits.importPDF()">Importovať PDF</button>
+          </div>
+        </div>
+        <div id="cr-import-result" style="margin-top:16px"></div>
+      </div>
+    </div>
+    <div id="cr-tab-parovanie" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+        <button class="btn btn-secondary" onclick="Views.credits.previewMatches()">Náhľad párovania</button>
+        <button class="btn btn-primary" onclick="Views.credits.runMatch()">Spárovať a aktualizovať faktúry</button>
+      </div>
+      <div id="cr-match-result"></div>
+    </div>`;
     ['cr-search','cr-trntype'].forEach(id => {
       const e = document.getElementById(id);
       e?.addEventListener(id==='cr-search'?'input':'change', () => this.load());
     });
     await this.load();
+  },
+
+  switchTab(tab, btn) {
+    ['pohyby','import','parovanie'].forEach(t => {
+      const el = document.getElementById('cr-tab-'+t);
+      if (el) el.style.display = t === tab ? '' : 'none';
+    });
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  },
+
+  async importOFX() {
+    const input = document.getElementById('cr-file-ofx');
+    if (!input.files.length) { App.toast('Vyberte súbor OFX', 'error'); return; }
+    const form = new FormData();
+    form.append('file', input.files[0]);
+    const res = document.getElementById('cr-import-result');
+    res.innerHTML = '<div class="loading">Importujem...</div>';
+    try {
+      const r = await fetch('/api/bank/import-ofx', { method: 'POST', body: form });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Chyba importu');
+      res.innerHTML = `<div class="alert alert-success">
+        ✅ Importované: <strong>${data.imported}</strong> transakcií<br>
+        Preskočené (duplikáty): ${data.skipped}<br>
+        Spolu v súbore: ${data.total}
+      </div>`;
+      App.toast(`Importované ${data.imported} pohybov`, 'success');
+      await this.load();
+    } catch(e) {
+      res.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+    }
+  },
+
+  async importPDF() {
+    const input = document.getElementById('cr-file-pdf');
+    if (!input.files.length) { App.toast('Vyberte PDF súbor', 'error'); return; }
+    const form = new FormData();
+    form.append('file', input.files[0]);
+    const res = document.getElementById('cr-import-result');
+    res.innerHTML = '<div class="loading">Spracovávam PDF...</div>';
+    try {
+      const r = await fetch('/api/bank/import-pdf', { method: 'POST', body: form });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Chyba importu PDF');
+      res.innerHTML = `<div class="alert alert-success">
+        ✅ Importované: <strong>${data.imported}</strong> transakcií<br>
+        Preskočené (duplikáty): ${data.skipped}<br>
+        Spolu nájdených: ${data.total}
+      </div>`;
+      App.toast(`Importované ${data.imported} pohybov z PDF`, 'success');
+      await this.load();
+    } catch(e) {
+      res.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+    }
+  },
+
+  async previewMatches() {
+    const res = document.getElementById('cr-match-result');
+    res.innerHTML = '<div class="loading">Hľadám zhody...</div>';
+    try {
+      const data = await API.get('/api/bank/match-preview');
+      this.renderMatchResult(data, false);
+    } catch(e) {
+      res.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+    }
+  },
+
+  async runMatch() {
+    if (!confirm('Spárovať transakcie s faktúrami? Zostatok faktúr bude aktualizovaný.')) return;
+    const res = document.getElementById('cr-match-result');
+    res.innerHTML = '<div class="loading">Párujem...</div>';
+    try {
+      const data = await API.post('/api/bank/match-invoices', {});
+      this.renderMatchResult(data, true);
+      App.toast(`Spárované: ${data.matched_count} faktúr`, 'success');
+    } catch(e) {
+      res.innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+    }
+  },
+
+  renderMatchResult(data, applied) {
+    const res = document.getElementById('cr-match-result');
+    const matches = data.matches || data.matched || [];
+    const unmatched = data.unmatched || [];
+    let html = `<div class="kpi-grid" style="margin-bottom:16px">
+      <div class="kpi-card"><div class="kpi-value" style="color:var(--green)">${matches.length}</div><div class="kpi-label">Spárovaných</div></div>
+      <div class="kpi-card"><div class="kpi-value" style="color:var(--red)">${unmatched.length}</div><div class="kpi-label">Nespárovaných</div></div>
+    </div>`;
+    if (matches.length) {
+      html += `<h4 style="margin:0 0 8px">✅ Spárované ${applied?'(aplikované)':'(náhľad)'}</h4>
+      <div class="table-wrap" style="margin-bottom:16px"><table>
+        <thead><tr><th>Č. FA</th><th>Odberateľ</th><th>Zaplatené</th><th>Zostatok pred</th><th>Zostatok po</th><th>Dátum</th></tr></thead>
+        <tbody>${matches.map(m => `<tr>
+          <td class="mono">${esc(m.cislo_faktury||'')}</td>
+          <td>${esc(m.odberatel||m.name||'')}</td>
+          <td class="cur cur-pos">${fmt_eur(m.trnamt)}</td>
+          <td class="cur">${fmt_eur(m.zostava_uhradit!=null?m.zostava_uhradit:m.old_zostava)}</td>
+          <td class="cur ${(m.new_zostava||0)<=0?'cur-pos':'cur-neg'}">${fmt_eur(m.new_zostava||0)}</td>
+          <td>${esc(m.dtposted||'')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+    }
+    if (unmatched.length) {
+      html += `<h4 style="margin:0 0 8px">❌ Nespárované platby</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ID pohybu</th><th>VS</th><th>Suma</th><th>Meno</th><th>Dátum</th><th>Akcia</th></tr></thead>
+        <tbody>${unmatched.map(u => `<tr>
+          <td class="mono">${u.credit_id}</td>
+          <td class="mono">${esc(u.trnvasym||'')}</td>
+          <td class="cur">${fmt_eur(u.trnamt)}</td>
+          <td>${esc(u.name||'')}</td>
+          <td>${esc(u.dtposted||'')}</td>
+          <td><button class="btn btn-sm btn-secondary" onclick="Views.credits.manualMatchDialog(${u.credit_id},${u.trnamt})">Spárovať ručne</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+    }
+    res.innerHTML = html;
+  },
+
+  async manualMatchDialog(creditId, amt) {
+    const cislo = prompt(`Zadajte číslo faktúry pre platbu ${fmt_eur(amt)}:`);
+    if (!cislo) return;
+    // Find invoice by number
+    const invs = await API.get('/api/invoices?search=' + encodeURIComponent(cislo));
+    const inv = invs.find(f => f.cislo_faktury === cislo);
+    if (!inv) { App.toast('Faktúra nenájdená: ' + cislo, 'error'); return; }
+    try {
+      await API.post('/api/bank/manual-match', { credit_id: creditId, invoice_id: inv.id });
+      App.toast('Platba spárovaná s faktúrou ' + cislo, 'success');
+      await this.previewMatches();
+    } catch(e) {
+      App.toast('Chyba: ' + e.message, 'error');
+    }
   },
 
   async load() {
@@ -1850,7 +2031,10 @@ Views.settings.render = async function() {
   const cont = document.getElementById('content');
   cont.innerHTML = '<div class="loading">Načítavam...</div>';
   const lk = State.lookups;
+  const usersHtml = await this.sectionUsers();
   cont.innerHTML = `
+    ${usersHtml}
+    ${this.sectionChangePassword()}
     ${this.section('Stavy projektov', lk.stavy_projektov||[], 'stavy', 'nazov')}
     ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
     ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
@@ -1936,6 +2120,78 @@ Views.settings.addJazyk = async function(btn) {
   this.render();
 };
 
+
+// ─── USER MANAGEMENT (Settings) ──────────────────────────────────────────────
+Views.settings.sectionUsers = async function() {
+  if (!State.currentUser?.is_admin) {
+    return `<div class="settings-section"><div class="settings-section-header"><h3>Môj účet</h3></div>
+      <div class="settings-section-body" style="padding:12px;font-size:13px;color:var(--text-muted)">
+        Prihlásený ako: <strong>${esc(State.currentUser?.plne_meno || State.currentUser?.username || '')}</strong>
+      </div></div>`;
+  }
+  const users = await API.get('/api/auth/users');
+  if (!users) return '';
+  const rows = users.map(u => `
+    <div class="settings-row" style="align-items:center;gap:8px">
+      <span style="min-width:120px;font-weight:500">${esc(u.username)}</span>
+      <span style="min-width:160px;color:var(--text-muted);font-size:12px">${esc(u.plne_meno||'')}</span>
+      <span class="tag ${u.is_admin?'tag-green':'tag-gray'}" style="font-size:11px">${u.is_admin?'Admin':'Používateľ'}</span>
+      <span class="tag ${u.active?'tag-green':'tag-red'}" style="font-size:11px">${u.active?'Aktívny':'Neaktívny'}</span>
+      <span style="font-size:11px;color:var(--text-muted)">${u.has_password?'✅ má heslo':'⚠️ bez hesla'}</span>
+      <div style="margin-left:auto;display:flex;gap:4px">
+        <button class="btn btn-sm btn-secondary" onclick="Views.settings.setUserPassword(${u.id},'${esc(u.username)}')">Nastaviť heslo</button>
+        <button class="btn btn-sm btn-secondary" onclick="Views.settings.toggleAdmin(${u.id})">Admin: ${u.is_admin?'Odobrať':'Pridať'}</button>
+        <button class="btn btn-sm ${u.active?'btn-danger':'btn-secondary'}" onclick="Views.settings.toggleActive(${u.id})">${u.active?'Deaktivovať':'Aktivovať'}</button>
+      </div>
+    </div>`).join('');
+  return `<div class="settings-section">
+    <div class="settings-section-header"><h3>Správa používateľov</h3></div>
+    <div class="settings-section-body">${rows || '<div style="padding:12px;color:var(--text-muted)">Žiadni používatelia</div>'}</div>
+  </div>`;
+};
+
+Views.settings.sectionChangePassword = function() {
+  return `<div class="settings-section">
+    <div class="settings-section-header"><h3>Zmena hesla</h3></div>
+    <div class="settings-section-body" style="padding:12px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="margin:0"><label style="font-size:12px">Staré heslo</label><input type="password" id="cp-old" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:160px"></div>
+        <div class="field" style="margin:0"><label style="font-size:12px">Nové heslo</label><input type="password" id="cp-new" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:160px"></div>
+        <div class="field" style="margin:0"><label style="font-size:12px">Zopakovať</label><input type="password" id="cp-new2" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:160px"></div>
+        <button class="btn btn-primary btn-sm" onclick="Views.settings.changePassword()">Zmeniť heslo</button>
+      </div>
+    </div>
+  </div>`;
+};
+
+Views.settings.setUserPassword = async function(uid, username) {
+  const pwd = prompt(`Nové heslo pre používateľa "${username}":`);
+  if (!pwd) return;
+  const r = await API.post(`/api/auth/users/${uid}/set-password`, { password: pwd });
+  if (r?.ok) { App.toast(`Heslo nastavené pre ${username}`, 'success'); Views.settings.render(); }
+  else App.toast(r?.detail || 'Chyba', 'error');
+};
+
+Views.settings.toggleAdmin = async function(uid) {
+  const r = await API.post(`/api/auth/users/${uid}/toggle-admin`, {});
+  if (r?.ok) { App.toast('Admin práva aktualizované', 'success'); Views.settings.render(); }
+};
+
+Views.settings.toggleActive = async function(uid) {
+  const r = await API.post(`/api/auth/users/${uid}/toggle-active`, {});
+  if (r?.ok) { App.toast('Stav používateľa aktualizovaný', 'success'); Views.settings.render(); }
+};
+
+Views.settings.changePassword = async function() {
+  const old = document.getElementById('cp-old')?.value || '';
+  const np = document.getElementById('cp-new')?.value || '';
+  const np2 = document.getElementById('cp-new2')?.value || '';
+  if (np !== np2) { App.toast('Heslá sa nezhodujú', 'error'); return; }
+  if (np.length < 4) { App.toast('Heslo musí mať aspoň 4 znaky', 'error'); return; }
+  const r = await API.post('/api/auth/change-password', { old_password: old, new_password: np });
+  if (r?.ok) { App.toast('Heslo zmenené', 'success'); document.getElementById('cp-old').value=''; document.getElementById('cp-new').value=''; document.getElementById('cp-new2').value=''; }
+  else App.toast(r?.detail || 'Chyba', 'error');
+};
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.App = App;

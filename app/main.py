@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,13 +8,16 @@ from sqlalchemy import select, func
 from app.database import init_db, get_db
 from app.models import Project, Invoice, Customer
 from app.routers import projects, items, invoices, customers, credits, imposition, lookups
-from app.routers import firmy, kontakty, naklady, iqk
+from app.routers import firmy, kontakty, naklady, iqk, bank, auth
+from app.database import AsyncSessionLocal
 import csv, io
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    async with AsyncSessionLocal() as db:
+        await auth.ensure_default_admin(db)
     yield
 
 
@@ -49,6 +52,8 @@ app.include_router(firmy.router)
 app.include_router(kontakty.router)
 app.include_router(naklady.router)
 app.include_router(iqk.router)
+app.include_router(bank.router)
+app.include_router(auth.router)
 app.include_router(lookups.jazyky_iqk_router)
 app.include_router(lookups.hviezdicky_router)
 
@@ -117,6 +122,14 @@ async def export_invoices(db: AsyncSession = Depends(get_db)):
         headers={"Content-Disposition": "attachment; filename=faktury.csv"})
 
 
+@app.get("/login")
+async def login_page():
+    return FileResponse("static/login.html")
+
+
 @app.get("/")
-async def root():
+async def root(request: Request):
+    token = request.cookies.get("eq_token")
+    if not token or not auth.decode_token(token):
+        return RedirectResponse("/login")
     return FileResponse("static/index.html")
