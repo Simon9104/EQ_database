@@ -130,7 +130,7 @@ const App = {
     const titles = {
       dashboard: 'Dashboard', projects: 'Projekty', items: 'Položky', invoices: 'Faktúry',
       firmy: 'Firmy', customers: 'Zákazníci', credits: 'Bankové pohyby',
-      imposition: 'Vyradovanie', settings: 'Nastavenia',
+      imposition: 'Vyradovanie', iqk: 'IQK – Knižná kultúra', settings: 'Nastavenia',
     };
     document.getElementById('topbar-title').textContent = titles[view] || view;
     const noAdd = ['dashboard', 'settings'];
@@ -640,6 +640,16 @@ Views.projects = {
         <div class="field"><label>Folder zákazky</label><input id="f-folder_zakazky" value="${v('folder_zakazky')}"></div>
         <div class="field"><label>Folder CP</label><input id="f-folder_cp" value="${v('folder_cp')}"></div>
         <div class="field"><label>Zúčastnení</label><input id="f-zucastneni" value="${v('zucastneni')}"></div>
+        <div class="field"><label>Prijal</label><input id="f-prijal" value="${v('prijal')}"></div>
+        <div class="field"><label>Zostáva</label><input id="f-zostava" value="${v('zostava')}"></div>
+        <div class="field"><label>Dát. prijatia obj.</label><input type="date" id="f-datum_prijatia_objednavky" value="${isoDate(p?.datum_prijatia_objednavky)}"></div>
+        <div class="field"><label>Dát. na objednávke</label><input type="date" id="f-datum_na_objednavke" value="${isoDate(p?.datum_na_objednavke)}"></div>
+        <div class="field"><label>Termín expedície</label><input type="date" id="f-projekt_expedovat_datum" value="${isoDate(p?.projekt_expedovat_datum)}"></div>
+        <div class="field"><label>Podobný projekt</label><input id="f-podobny_projekt" value="${v('podobny_projekt')}"></div>
+        <div class="field"><label>F1</label><input id="f-f1" value="${v('f1')}"></div>
+        <div class="field"><label>F2</label><input id="f-f2" value="${v('f2')}"></div>
+        <div class="field"><label>F3</label><input id="f-f3" value="${v('f3')}"></div>
+        <div class="field"><label>F4</label><input id="f-f4" value="${v('f4')}"></div>
       </div>
     </div>
     <div id="pf-finance" style="display:none">
@@ -749,12 +759,13 @@ Views.projects = {
   async save() {
     const fields = ['nazov_projektu','nazov_firmy','priezvisko_meno','manazer','stav','kategoria','priorita',
       'cislo_objednavky','cislo_cp','strucna_specifikacia','folder_zakazky','folder_cp','zucastneni',
+      'prijal','zostava','podobny_projekt','f1','f2','f3','f4',
       'poznamky','poznamky_zl','poznamky_1','poznamka_cp','projekt_log',
       'cena_bez_dph','dph_ceny','cena_s_dph','naklady','zisk','kredit','cena_bez_fa','naklady_bez_fa'];
     const bools = ['projekt_kreditny','projekt_zberny','projekt_kniha','projekt_cp','projekt_oznaceny',
       'projekt_sledovany','projekt_cakajuci','projekt_bezny','projekt_hotovo','projekt_fakturovany',
       'projekt_fakturovany_vopred','projekt_uhradeny','projekt_expedovat','vpt_agenturnacena'];
-    const dates = ['prijate','termin_odovzdania'];
+    const dates = ['prijate','termin_odovzdania','datum_prijatia_objednavky','datum_na_objednavke','projekt_expedovat_datum'];
     const nums = ['cena_bez_dph','dph_ceny','cena_s_dph','naklady','zisk','kredit','cena_bez_fa','naklady_bez_fa'];
     const data = {};
     fields.forEach(f => {
@@ -907,13 +918,14 @@ Views.items = {
         <div class="field"><label>Typ zákazky</label><select id="fi-typ_zakazky"><option value="">—</option>${typOpts}</select></div>
         <div class="field form-full"><label>Stručná špecifikácia</label><input id="fi-strucna_specifikacia" value="${v('strucna_specifikacia')}"></div>
         <div class="field form-full"><label>Poznámka</label><textarea id="fi-poznamka">${v('poznamka')}</textarea></div>
+        <div class="field form-full"><label>Poznámka VL</label><textarea id="fi-poznamka_vl">${v('poznamka_vl')}</textarea></div>
       </div>
       <div class="checkbox-row" style="margin-top:8px">
         ${cbox('fi-fakturovat','Fakturovať',chk('fakturovat'))}
         ${cbox('fi-fakturovane','Fakturované',chk('fakturovane'))}
         ${cbox('fi-faktura_vopred','Faktúra vopred',chk('faktura_vopred'))}
         ${cbox('fi-odovzdane','Odovzdané',chk('odovzdane'))}
-        ${cbox('fi-dl','DL',chk('dl'))}
+        ${cbox('fi-dl','DL',chk('dl'))} ${cbox('fi-vkladacky_ano_nie','Vkladačky',chk('vkladacky_ano_nie'))} ${cbox('fi-do_faktury','Do faktúry',chk('do_faktury'))}
       </div>
     </div>
     <div id="if-tlac" style="display:none">
@@ -929,6 +941,9 @@ Views.items = {
         <div class="field"><label>Obal papier typ</label><input id="fi-db_ob_papier_typ" value="${v('db_ob_papier_typ')}"></div>
         <div class="field"><label>Obal PÚ</label><input id="fi-db_ob_pu" value="${v('db_ob_pu')}"></div>
         <div class="field"><label>Chrbát</label><input id="fi-db_chrbat" value="${v('db_chrbat')}"></div>
+        <div class="field"><label>Ako vkladať</label><textarea id="fi-ako_vkladat" style="min-height:60px">${v('ako_vkladat')}</textarea></div>
+        <div class="field"><label>Na FAR</label><textarea id="fi-na_far">${v('na_far')}</textarea></div>
+        <div class="field"><label>Zhrnutý text vyradovača</label><textarea id="fi-zhrnuty_text_vyradovaca">${v('zhrnuty_text_vyradovaca')}</textarea></div>
         <div class="field"><label>Lacetka</label><input id="fi-db_lacetka" value="${v('db_lacetka')}"></div>
       </div>
     </div>
@@ -951,11 +966,11 @@ Views.items = {
       'status','typ_zakazky','format','vazba','typ_kalkulacie',
       'db_vn_papier_typ','db_vn_papier_lesk_mat','db_vn_papier_specifikacia',
       'db_ob_farebnost','db_ob_papier_typ','db_ob_papier_lesk_mat',
-      'db_ob_pu','db_chrbat','db_lacetka','komu_dodat','polozka_kde_vyzdvihnut',
+      'db_ob_pu','db_chrbat','db_lacetka','komu_dodat','polozka_kde_vyzdvihnut','poznamka_vl','ako_vkladat','na_far','zhrnuty_text_vyradovaca',
       'cislo_faktury','kto_fakturuje'];
     const nums = ['pocet','jc','cena','zlava','sadzba_dph','cena_s_dph',
       'pocet_stran','pocet_stran_far','id_projektu','poradie'];
-    const bools = ['fakturovat','fakturovane','faktura_vopred','odovzdane','dl','polozka_expedovat'];
+    const bools = ['fakturovat','fakturovane','faktura_vopred','odovzdane','dl','polozka_expedovat','vkladacky_ano_nie','do_faktury'];
     const dates = ['polozka_expedovat_datum','datum_fakturacie'];
     const data = {};
     textFields.forEach(f => { const e = document.getElementById('fi-'+f); if (e) data[f] = e.value || null; });
@@ -1637,7 +1652,7 @@ function switchTab(el, targetId) {
                    'pf-basic','pf-finance','pf-flags','pf-notes',
                    'if-basic','if-tlac','if-expedia',
                    'fd-basic','fd-fakturacia','fd-kontakty',
-                   'ff-basic','ff-fakturacia','ff-nastavenia'];
+                   'ff-basic','ff-fakturacia','ff-nastavenia','iqk-zakladne','iqk-transakcie-tab'];
   tabIds.forEach(id => {
     const el2 = document.getElementById(id);
     if (el2) el2.style.display = 'none';
@@ -1645,6 +1660,282 @@ function switchTab(el, targetId) {
   const target = document.getElementById(targetId);
   if (target) target.style.display = '';
 }
+
+
+// ─── IQK ─────────────────────────────────────────────────────────────────────
+Views.iqk = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = `
+    <div class="filter-bar">
+      <input type="search" id="iqk-search" placeholder="Hľadať názov, ISBN, autora...">
+      <button class="btn btn-secondary btn-sm" onclick="Views.iqk.load()">Načítať</button>
+    </div>
+    <div id="iqk-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    document.getElementById('iqk-search')?.addEventListener('input', () => this.load());
+    await this.load();
+  },
+
+  async load() {
+    const s = document.getElementById('iqk-search')?.value || '';
+    const data = await API.get('/api/iqk/produkty?search=' + encodeURIComponent(s) + '&limit=200');
+    const stat = await API.get('/api/iqk/statistika');
+    const wrap = document.getElementById('iqk-table-wrap');
+    if (!wrap) return;
+    const statBar = `<div class="kpi-grid" style="margin-bottom:16px">
+      <div class="kpi-card"><div class="kpi-value">${stat.produktov}</div><div class="kpi-label">Produktov</div></div>
+      <div class="kpi-card"><div class="kpi-value">${stat.transakcii}</div><div class="kpi-label">Transakcií</div></div>
+      <div class="kpi-card"><div class="kpi-value">${fmt_eur(stat.suma_celkom)}</div><div class="kpi-label">Celková suma</div></div>
+    </div>`;
+    if (!data.length) { wrap.innerHTML = statBar + '<div class="empty">Žiadne IQK produkty. Kliknite + Pridať na vytvorenie.</div>'; return; }
+    wrap.innerHTML = statBar + `<div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Názov</th><th>ISBN</th><th>Autor</th><th>Vydavateľ</th><th>Rok</th><th>Strán</th><th>Náklad</th><th>Cena s DPH</th><th>Stav</th></tr></thead>
+      <tbody>${data.map(p => `<tr onclick="Views.iqk.openDetail(${p.id})">
+        <td class="mono">${p.id}</td>
+        <td class="td-truncate" style="max-width:250px"><strong>${esc(p.nazov||'')}</strong></td>
+        <td class="mono">${esc(p.isbn||'')}</td>
+        <td>${esc(p.autor||'')}</td>
+        <td>${esc(p.vydavatel||'')}</td>
+        <td>${p.rok_vydania||''}</td>
+        <td>${p.pocet_stran||''}</td>
+        <td>${p.naklad||''}</td>
+        <td class="cur">${fmt_eur(p.cena_s_dph)}</td>
+        <td>${p.aktualny_stav||0}</td>
+      </tr>`).join('')}</tbody></table>
+      <div class="pagination"><span>${data.length} produktov</span></div>
+    </div>`;
+  },
+
+  async openDetail(id) {
+    const p = await API.get('/api/iqk/produkty/' + id);
+    if (!p) return;
+    const transakcie = await API.get('/api/iqk/produkty/' + id + '/transakcie');
+    const tBody = transakcie.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Typ</th><th>Firma</th><th>Množstvo</th><th>JC</th><th>Suma</th><th>Dátum</th><th>Typ odmeny</th><th>Fak.</th></tr></thead>
+      <tbody>${transakcie.map(t => `<tr>
+        <td class="mono">${t.id}</td>
+        <td><span class="tag">${esc(t.typ_transakcie||'')}</span></td>
+        <td>${t.firma_id||''}</td>
+        <td>${t.mnozstvo||0}</td>
+        <td class="cur">${fmt_eur(t.jc)}</td>
+        <td class="cur">${fmt_eur(t.suma)}</td>
+        <td>${fmt_date(t.datum)}</td>
+        <td>${esc(t.typ_odmeny||'')}</td>
+        <td>${t.fakturovane?'✅':t.fakturovat?'○':''}</td>
+      </tr>`).join('')}</tbody></table></div>` : '<div class="empty" style="padding:10px">Žiadne transakcie</div>';
+
+    const jazyky = State.lookups.jazyky_iqk || [];
+    const jazyk = jazyky.find(j => j.id === p.jazyk_id);
+    const body = `
+      <div class="tabs">
+        <span class="tab active" onclick="switchTab(this,'iqk-zakladne')">Základné</span>
+        <span class="tab" onclick="switchTab(this,'iqk-transakcie-tab')">Transakcie (${transakcie.length})</span>
+      </div>
+      <div id="iqk-zakladne">
+        <div class="detail-grid">
+          ${dfield('ID', p.id)} ${dfield('ISBN', p.isbn)}
+          ${dfield('Názov', p.nazov, 'full')}
+          ${dfield('Autor', p.autor)} ${dfield('Vydavateľ', p.vydavatel)}
+          ${dfield('Rok vydania', p.rok_vydania)} ${dfield('Jazyk', jazyk ? (jazyk.jazyk_vydania + ' / ' + jazyk.jazyk_konkretne) : p.jazyk_id)}
+          ${dfield('Počet strán', p.pocet_stran)} ${dfield('Náklad', p.naklad)}
+          ${dfield('Cena bez DPH', fmt_eur(p.cena_bez_dph))} ${dfield('Sadzba DPH', p.sadzba_dph != null ? (p.sadzba_dph*100).toFixed(0)+'%' : '')}
+          ${dfield('Cena s DPH', fmt_eur(p.cena_s_dph))} ${dfield('Aktuálny stav', p.aktualny_stav)}
+        </div>
+        ${p.poznamka ? `<div class="detail-section"><h4>Poznámka</h4><p style="font-size:13px">${esc(p.poznamka)}</p></div>` : ''}
+      </div>
+      <div id="iqk-transakcie-tab" style="display:none">
+        ${tBody}
+        <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.iqk.openAddTransakcia(${p.id})">+ Pridať transakciu</button>
+      </div>`;
+    App.openDetail(p.nazov || 'IQK Produkt', body, () => this.openEdit(p.id));
+  },
+
+  openAdd() { this.openForm(null); },
+  async openEdit(id) { const p = await API.get('/api/iqk/produkty/' + id); if (p) this.openForm(p); },
+
+  openForm(p) {
+    const v = k => esc(p?.[k] ?? '');
+    const jazyky = State.lookups.jazyky_iqk || [];
+    const jazOpts = jazyky.map(j => `<option value="${j.id}" ${p?.jazyk_id===j.id?'selected':''}>${esc(j.jazyk_vydania)} – ${esc(j.jazyk_konkretne||'')}</option>`).join('');
+    const body = `<div class="form-grid">
+      <div class="field form-full"><label>Názov</label><input id="iqk-nazov" value="${v('nazov')}"></div>
+      <div class="field"><label>ISBN</label><input id="iqk-isbn" value="${v('isbn')}"></div>
+      <div class="field"><label>Autor</label><input id="iqk-autor" value="${v('autor')}"></div>
+      <div class="field"><label>Vydavateľ</label><input id="iqk-vydavatel" value="${v('vydavatel')}"></div>
+      <div class="field"><label>Rok vydania</label><input type="number" id="iqk-rok_vydania" value="${p?.rok_vydania||''}"></div>
+      <div class="field"><label>Jazyk</label><select id="iqk-jazyk_id"><option value="">—</option>${jazOpts}</select></div>
+      <div class="field"><label>Počet strán</label><input type="number" id="iqk-pocet_stran" value="${p?.pocet_stran||''}"></div>
+      <div class="field"><label>Náklad</label><input type="number" id="iqk-naklad" value="${p?.naklad||''}"></div>
+      <div class="field"><label>Cena bez DPH</label><input type="number" step="0.01" id="iqk-cena_bez_dph" value="${p?.cena_bez_dph||''}"></div>
+      <div class="field"><label>Sadzba DPH (0-1)</label><input type="number" step="0.01" id="iqk-sadzba_dph" value="${p?.sadzba_dph??0.1}"></div>
+      <div class="field"><label>Cena s DPH</label><input type="number" step="0.01" id="iqk-cena_s_dph" value="${p?.cena_s_dph||''}"></div>
+      <div class="field"><label>Aktuálny stav (ks)</label><input type="number" id="iqk-aktualny_stav" value="${p?.aktualny_stav||0}"></div>
+      <div class="field form-full"><label>Poznámka</label><textarea id="iqk-poznamka">${v('poznamka')}</textarea></div>
+    </div>`;
+    App.openModal(p ? `Upraviť IQK produkt #${p.id}` : 'Nový IQK produkt', body, p?.id, !!p);
+  },
+
+  async save() {
+    const text = ['nazov','isbn','autor','vydavatel','poznamka'];
+    const nums = ['rok_vydania','pocet_stran','naklad','cena_bez_dph','sadzba_dph','cena_s_dph','aktualny_stav','jazyk_id'];
+    const data = {};
+    text.forEach(f => { data[f] = document.getElementById('iqk-'+f)?.value || null; });
+    nums.forEach(f => { const e = document.getElementById('iqk-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value)||null : null; });
+    if (State.editId) await API.put('/api/iqk/produkty/' + State.editId, data);
+    else await API.post('/api/iqk/produkty', data);
+    showToast('IQK produkt uložený', 'success');
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť IQK produkt?')) return;
+    await API.del('/api/iqk/produkty/' + State.editId);
+    showToast('IQK produkt odstránený', 'info');
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  openAddTransakcia(produktId) {
+    const typy = State.lookups.typy_odmeny || [];
+    const typOpts = typy.map(t => `<option value="${esc(t.nazov)}">${esc(t.nazov)}</option>`).join('');
+    const body = `<div class="form-grid">
+      <div class="field"><label>Typ transakcie</label>
+        <select id="it-typ_transakcie">
+          <option value="dodanie">Dodanie</option>
+          <option value="predaj">Predaj</option>
+          <option value="vrátenie">Vrátenie</option>
+          <option value="odmena">Odmena</option>
+          <option value="fakturácia">Fakturácia</option>
+        </select>
+      </div>
+      <div class="field"><label>Množstvo</label><input type="number" id="it-mnozstvo" value="0"></div>
+      <div class="field"><label>Jednotková cena</label><input type="number" step="0.01" id="it-jc" value="0"></div>
+      <div class="field"><label>Suma</label><input type="number" step="0.01" id="it-suma" value="0"></div>
+      <div class="field"><label>Dátum</label><input type="date" id="it-datum" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>Typ odmeny</label><select id="it-typ_odmeny"><option value="">—</option>${typOpts}</select></div>
+      <div class="field form-full"><label>Poznámka</label><textarea id="it-poznamka"></textarea></div>
+    </div>
+    <div class="checkbox-row" style="margin-top:8px">
+      ${cbox('it-fakturovat','Fakturovať','')} ${cbox('it-fakturovane','Fakturované','')}
+    </div>`;
+    App.openModal('Nová transakcia', body, null, false);
+    document.getElementById('modal-save-btn').onclick = async () => {
+      const data = {
+        produkt_id: produktId,
+        typ_transakcie: document.getElementById('it-typ_transakcie')?.value,
+        mnozstvo: parseInt(document.getElementById('it-mnozstvo')?.value)||0,
+        jc: parseFloat(document.getElementById('it-jc')?.value)||0,
+        suma: parseFloat(document.getElementById('it-suma')?.value)||0,
+        datum: document.getElementById('it-datum')?.value || null,
+        typ_odmeny: document.getElementById('it-typ_odmeny')?.value || null,
+        poznamka: document.getElementById('it-poznamka')?.value || null,
+        fakturovat: !!document.getElementById('it-fakturovat')?.checked,
+        fakturovane: !!document.getElementById('it-fakturovane')?.checked,
+      };
+      await API.post('/api/iqk/transakcie', data);
+      showToast('Transakcia pridaná', 'success');
+      App.closeModal();
+      Views.iqk.openDetail(produktId);
+    };
+  },
+};
+
+
+// Patch Settings to add PovrchovaUprava and JazykyIQK sections
+const _origSettingsRender = Views.settings.render.bind(Views.settings);
+Views.settings.render = async function() {
+  const cont = document.getElementById('content');
+  cont.innerHTML = '<div class="loading">Načítavam...</div>';
+  const lk = State.lookups;
+  cont.innerHTML = `
+    ${this.section('Stavy projektov', lk.stavy_projektov||[], 'stavy', 'nazov')}
+    ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
+    ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
+    ${this.section('Typy odmien', lk.typy_odmeny||[], 'typy-odmeny', 'nazov')}
+    ${this.section('Typy nákladov', lk.typy_nakladov||[], 'typy-nakladov', 'nazov')}
+    ${this.section('Podfiltre projektov', lk.podfilter_projektov||[], 'podfilter', 'nazov')}
+    ${this.sectionVazby(lk.vazby||[])}
+    ${this.sectionPovrchovaUprava(lk.povrchova_uprava||[])}
+    ${this.sectionDPH(lk.sadzby_dph||[])}
+    ${this.sectionObalkaCeny(lk.obalka_ceny||[])}
+    ${this.sectionJazykyIQK(lk.jazyky_iqk||[])}
+  `;
+  this.bindEvents();
+};
+
+Views.settings.sectionPovrchovaUprava = function(rows) {
+  const rowsHtml = rows.map(r => `
+    <div class="settings-row" data-id="${r.id}" data-endpoint="povrchova-uprava">
+      <input placeholder="Názov" value="${esc(r.nazov||'')}" style="flex:1;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fpv-nazov">
+      <input placeholder="Skratka" value="${esc(r.skratka||'')}" style="width:80px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fpv-skratka">
+      <button class="btn-icon" onclick="Views.settings.savePovrchovaUprava(this)">💾</button>
+      <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
+    </div>`).join('');
+  return `<div class="settings-section">
+    <div class="settings-section-header"><h3>Povrchová úprava</h3>
+      <button class="btn btn-sm btn-primary" onclick="Views.settings.addPovrchovaUprava(this)">+ Pridať</button>
+    </div>
+    <div class="settings-section-body" id="sb-povrchova-uprava">${rowsHtml}</div>
+  </div>`;
+};
+
+Views.settings.savePovrchovaUprava = async function(btn) {
+  const row = btn.closest('.settings-row');
+  const id = row.dataset.id;
+  const nazov = row.querySelector('.fpv-nazov').value;
+  const skratka = row.querySelector('.fpv-skratka').value;
+  await API.put(`/api/povrchova-uprava/${id}`, { nazov, skratka });
+  await this.refreshLookups();
+};
+
+Views.settings.addPovrchovaUprava = async function(btn) {
+  const nazov = prompt('Povrchová úprava (napr. lesklé lamino):');
+  if (!nazov) return;
+  const skratka = prompt('Skratka (napr. LL):') || '';
+  await API.post('/api/povrchova-uprava', { nazov, skratka });
+  await this.refreshLookups();
+  this.render();
+};
+
+Views.settings.sectionJazykyIQK = function(rows) {
+  const rowsHtml = rows.map(r => `
+    <div class="settings-row" data-id="${r.id}" data-endpoint="jazyky-iqk">
+      <input placeholder="Jazyk vydania" value="${esc(r.jazyk_vydania||'')}" style="width:160px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fjq-vydania">
+      <input placeholder="Konkrétny jazyk" value="${esc(r.jazyk_konkretne||'')}" style="flex:1;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fjq-konkretne">
+      <input placeholder="Preklad" value="${esc(r.jazyk_preklad||'')}" style="width:120px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fjq-preklad">
+      <button class="btn-icon" onclick="Views.settings.saveJazyk(this)">💾</button>
+      <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
+    </div>`).join('');
+  return `<div class="settings-section">
+    <div class="settings-section-header"><h3>Jazyky IQK</h3>
+      <button class="btn btn-sm btn-primary" onclick="Views.settings.addJazyk(this)">+ Pridať</button>
+    </div>
+    <div class="settings-section-body" id="sb-jazyky-iqk">${rowsHtml}</div>
+  </div>`;
+};
+
+Views.settings.saveJazyk = async function(btn) {
+  const row = btn.closest('.settings-row');
+  const id = row.dataset.id;
+  const jazyk_vydania = row.querySelector('.fjq-vydania').value;
+  const jazyk_konkretne = row.querySelector('.fjq-konkretne').value;
+  const jazyk_preklad = row.querySelector('.fjq-preklad').value;
+  await API.put(`/api/jazyky-iqk/${id}`, { jazyk_vydania, jazyk_konkretne, jazyk_preklad });
+  await this.refreshLookups();
+};
+
+Views.settings.addJazyk = async function(btn) {
+  const jazyk_vydania = prompt('Jazyk vydania:');
+  if (!jazyk_vydania) return;
+  const jazyk_konkretne = prompt('Konkrétny jazyk:') || '';
+  await API.post('/api/jazyky-iqk', { jazyk_vydania, jazyk_konkretne, jazyk_preklad: '' });
+  await this.refreshLookups();
+  this.render();
+};
+
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.App = App;

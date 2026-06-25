@@ -388,3 +388,65 @@ class TypOdmeny(Base):
     __tablename__ = "typ_odmeny"
     id = Column(Integer, primary_key=True)
     nazov = Column(String(255))
+
+
+class JazykIQK(Base):
+    __tablename__ = "jazyky_iqk"
+    id = Column(Integer, primary_key=True)
+    jazyk_vydania = Column(String(255))
+    jazyk_konkretne = Column(String(255))
+    jazyk_preklad = Column(String(255))
+
+
+class Hviezdicky(Base):
+    __tablename__ = "hviezdicky"
+    id = Column(Integer, primary_key=True)
+    znak = Column(String(50))
+
+
+# IQK – book publishing registry
+class IQKProdukt(Base):
+    __tablename__ = "iqk_produkty"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nazov = Column(String(500))
+    isbn = Column(String(50))
+    autor = Column(String(255))
+    vydavatel = Column(String(255))
+    rok_vydania = Column(Integer)
+    jazyk_id = Column(Integer)
+    pocet_stran = Column(Integer)
+    naklad = Column(Integer)
+    cena_bez_dph = Column(Float)
+    sadzba_dph = Column(Float, default=0.1)
+    cena_s_dph = Column(Float)
+    poznamka = Column(Text)
+    aktualny_stav = Column(Integer, default=0)
+    firma_id = Column(Integer)
+
+
+class IQKSklad(Base):
+    __tablename__ = "iqk_sklady"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    produkt_id = Column(Integer, index=True)
+    dodane = Column(Integer, default=0)
+    predane = Column(Integer, default=0)
+    vykupene = Column(Integer, default=0)
+    zostatok = Column(Integer, default=0)
+    datum = Column(DateTime)
+    poznamka = Column(Text)
+
+
+class IQKTransakcia(Base):
+    __tablename__ = "iqk_transakcie"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    produkt_id = Column(Integer, index=True)
+    firma_id = Column(Integer)
+    typ_transakcie = Column(String(50))  # dodanie, predaj, vrátenie, odmena
+    mnozstvo = Column(Integer, default=0)
+    jc = Column(Float)
+    suma = Column(Float)
+    datum = Column(DateTime)
+    typ_odmeny = Column(String(100))
+    poznamka = Column(Text)
+    fakturovat = Column(Boolean, default=False)
+    fakturovane = Column(Boolean, default=False)

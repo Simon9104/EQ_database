@@ -5,7 +5,7 @@ from app.database import get_db
 from app.models import (
     StavProjektu, StatusPolozky, TypZakazky, Vazba,
     PovrchovaUprava, SadzbaDPH, User, PodfilterProjektu, TypOdmeny,
-    TypNakladu, ObalkaCena
+    TypNakladu, ObalkaCena, JazykIQK, Hviezdicky
 )
 
 router = APIRouter(prefix="/api/lookups", tags=["lookups"])
@@ -30,6 +30,8 @@ async def get_all_lookups(db: AsyncSession = Depends(get_db)):
         "typy_odmeny": await fetch(TypOdmeny),
         "typy_nakladov": await fetch(TypNakladu),
         "obalka_ceny": await fetch(ObalkaCena),
+        "jazyky_iqk": await fetch(JazykIQK),
+        "hviezdicky": await fetch(Hviezdicky),
     }
 
 
@@ -74,6 +76,8 @@ def make_crud(model, prefix):
     return sub
 
 
+jazyky_iqk_router = make_crud(JazykIQK, "jazyky-iqk")
+hviezdicky_router = make_crud(Hviezdicky, "hviezdicky")
 typ_nakladov_router = make_crud(TypNakladu, "typy-nakladov")
 obalka_ceny_router = make_crud(ObalkaCena, "obalka-ceny")
 stavy_router = make_crud(StavProjektu, "stavy")
