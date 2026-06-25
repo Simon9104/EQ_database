@@ -144,6 +144,28 @@ def init_tables(c):
     );
     CREATE TABLE IF NOT EXISTS podfilter_projektov (id INTEGER PRIMARY KEY, nazov TEXT);
     CREATE TABLE IF NOT EXISTS typ_odmeny (id INTEGER PRIMARY KEY, nazov TEXT);
+    CREATE TABLE IF NOT EXISTS firmy (
+        id INTEGER PRIMARY KEY, nazov TEXT, skratka TEXT, adresa TEXT,
+        mesto TEXT, psc TEXT, stat TEXT, telefon TEXT, email TEXT,
+        fax TEXT, ico TEXT, ic_dph TEXT, dic TEXT, cislo_uctu TEXT,
+        platca_dph INTEGER DEFAULT 0, agentura INTEGER DEFAULT 0,
+        odberatel INTEGER DEFAULT 1, dodavatel INTEGER DEFAULT 0,
+        webova_stranka TEXT, poznamka TEXT
+    );
+    CREATE TABLE IF NOT EXISTS kontakty (
+        id INTEGER PRIMARY KEY, firma_id INTEGER, priezvisko TEXT, meno TEXT,
+        funkcia TEXT, oddelenie TEXT, telefon_praca TEXT, mobil1 TEXT,
+        mobil2 TEXT, email TEXT, poznamky TEXT
+    );
+    CREATE TABLE IF NOT EXISTS naklady (
+        id INTEGER PRIMARY KEY, id_projektu INTEGER, popis TEXT, mj TEXT,
+        pocet REAL, jc_vyroba REAL, vyroba REAL, id_dodavatel INTEGER,
+        hotovo INTEGER DEFAULT 0, skontrolovane INTEGER DEFAULT 0,
+        kedy_skontrolovane TEXT, objednavka TEXT, poznamka TEXT,
+        kde_je TEXT, typ_nakladu TEXT
+    );
+    CREATE TABLE IF NOT EXISTS typ_nakladov (id INTEGER PRIMARY KEY, nazov TEXT);
+    CREATE TABLE IF NOT EXISTS obalka_ceny (id INTEGER PRIMARY KEY AUTOINCREMENT, farebnost TEXT, jcv REAL);
     """)
 
 
@@ -521,6 +543,67 @@ def run():
             c.execute(f"INSERT OR REPLACE INTO {table} ({col_str}) VALUES ({placeholders})", vals)
         conn.commit()
         print(f"  {table}: {len(rows)} rows")
+
+    # Firmy (from adresy.csv)
+    print("Importing firmy (from adresy)...")
+    rows = read_csv("/tmp/adresy.csv")
+    for r in rows:
+        c.execute("INSERT OR REPLACE INTO firmy (id, nazov, telefon, email) VALUES (?,?,?,?)", (
+            parse_int(r.get("ID")),
+            r.get("customer_name", ""),
+            r.get("customer_phone", ""),
+            r.get("customer_email", ""),
+        ))
+    conn.commit()
+    print(f"  {len(rows)} firmy imported")
+
+    # Typ nakladov
+    print("Importing typ_nakladov...")
+    c.execute("DELETE FROM typ_nakladov")
+    for row in [("1","digitál"),("2","V2"),("3","V8"),("4","ofset"),("5","VPT"),("6","UV lak"),("7","iné")]:
+        c.execute("INSERT OR REPLACE INTO typ_nakladov (id, nazov) VALUES (?,?)", row)
+    conn.commit()
+    print("  7 typ_nakladov imported")
+
+    # Obalka ceny
+    print("Importing obalka_ceny...")
+    c.execute("DELETE FROM obalka_ceny")
+    for row in [("4+0", 0.034), ("4+1", 0.0513), ("4+4", 0.068), ("1+1", 0.0346), ("1+0", 0.0173)]:
+        c.execute("INSERT INTO obalka_ceny (farebnost, jcv) VALUES (?,?)", row)
+    conn.commit()
+    print("  5 obalka_ceny imported")
+
+    # TestPolozky items
+    print("Importing TestPolozky items...")
+    rows = read_csv("/tmp/testpolozky.csv")
+    for r in rows:
+        c.execute("""INSERT OR REPLACE INTO polozky (
+            id, id_projektu, popis, podpopis, mj, pocet, jc, cena,
+            zlava, sadzba_dph, cena_s_dph, status, fakturovat, fakturovane,
+            faktura_vopred, kto_fakturuje, datum_fakturacie, cislo_faktury, poznamka
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            parse_int(r.get("PolozkaID")),
+            parse_int(r.get("IDProjektu")),
+            r.get("Popis", ""),
+            r.get("Podpopis", ""),
+            r.get("mj", ""),
+            parse_float(r.get("Počet")),
+            parse_float(r.get("jc")),
+            parse_float(r.get("Cena")),
+            parse_float(r.get("Zľava")),
+            parse_float(r.get("SadzbaDPH")),
+            parse_float(r.get("Cena_s_DPH")),
+            r.get("Status", ""),
+            parse_bool(r.get("Fakturovať")),
+            parse_bool(r.get("Fakturované")),
+            parse_bool(r.get("Faktúra vopred")),
+            r.get("Kto fakturuje", ""),
+            parse_date(r.get("Dátum fakturácie")),
+            r.get("Číslo faktúry", ""),
+            r.get("Poznámka", ""),
+        ))
+    conn.commit()
+    print(f"  {len(rows)} test items imported")
 
     # DPH
     rows = read_csv("/tmp/dph.csv")
