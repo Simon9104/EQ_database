@@ -225,7 +225,7 @@ async def change_password(data: dict, user: User = Depends(get_current_user), db
 async def ensure_default_admin(db: AsyncSession):
     """Create default admin if no users have passwords yet."""
     result = await db.execute(select(User).where(User.password_hash != None))
-    existing = result.scalar_one_or_none()
+    existing = result.scalars().first()
     if existing:
         return
     # Check if any user exists at all
