@@ -46,9 +46,114 @@ def read_csv(path):
         return list(csv.DictReader(f))
 
 
+def init_tables(c):
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS projekty (
+        id INTEGER PRIMARY KEY, nazov_projektu TEXT, nazov_firmy TEXT,
+        priezvisko_meno TEXT, manazer TEXT, kategoria TEXT, priorita TEXT,
+        stav TEXT, f1 TEXT, f2 TEXT, f3 TEXT, f4 TEXT, stav2 TEXT, stav3 TEXT,
+        force INTEGER, prijate TEXT, prijal TEXT, termin_odovzdania TEXT,
+        zostava TEXT, poznamky TEXT, poznamky_zl TEXT, poznamky_1 TEXT,
+        poznamka_cp TEXT, folder_zakazky TEXT, folder_cp TEXT,
+        cislo_objednavky TEXT, datum_prijatia_objednavky TEXT,
+        datum_na_objednavke TEXT, cena_bez_dph REAL, dph_ceny REAL,
+        cena_s_dph REAL, naklady REAL, zisk REAL, cena_bez_fa REAL,
+        naklady_bez_fa REAL, vpt_agenturnacena INTEGER, projekt_expedovat INTEGER,
+        projekt_expedovat_datum TEXT, projekt_oznaceny INTEGER,
+        projekt_kreditny INTEGER, projekt_zberny INTEGER,
+        projekt_fakturovany INTEGER, projekt_fakturovany_vopred INTEGER,
+        projekt_uhradeny INTEGER, projekt_cp INTEGER, projekt_sledovany INTEGER,
+        projekt_kniha INTEGER, projekt_cakajuci INTEGER, projekt_bezny INTEGER,
+        projekt_hotovo INTEGER, kredit REAL, zucastneni TEXT,
+        strucna_specifikacia TEXT, cislo_cp TEXT, podobny_projekt TEXT, projekt_log TEXT
+    );
+    CREATE TABLE IF NOT EXISTS polozky (
+        id INTEGER PRIMARY KEY, poradie INTEGER, id_projektu INTEGER,
+        popis TEXT, podpopis TEXT, strucna_specifikacia TEXT, mj TEXT,
+        pocet REAL, jc REAL, cena REAL, zlava REAL, sadzba_dph REAL,
+        cena_s_dph REAL, status TEXT, typ_zakazky TEXT, polozka_pracuje TEXT,
+        fakturovat INTEGER, fakturovane INTEGER, faktura_vopred INTEGER,
+        do_faktury INTEGER, kto_fakturuje TEXT, datum_fakturacie TEXT,
+        cislo_faktury TEXT, id_faktury TEXT, poznamka TEXT, poznamka_vl TEXT,
+        vyber_x INTEGER, polozka_x INTEGER, dl INTEGER, objednavka_x INTEGER,
+        cp_polozky_x INTEGER, odovzdane INTEGER, typ_kalkulacie TEXT,
+        pocet_stran INTEGER, pocet_stran_far INTEGER, format TEXT, vazba TEXT,
+        db_vn_papier_typ TEXT, db_vn_papier_lesk_mat TEXT,
+        db_vn_papier_specifikacia TEXT, db_ob_farebnost TEXT,
+        db_ob_papier_typ TEXT, db_ob_papier_lesk_mat TEXT, db_ob_pu TEXT,
+        db_ob_pu_skratka TEXT, db_chrbat TEXT, db_lacetka TEXT, format_th TEXT,
+        far_strany TEXT, cb_klikov_na_far_spolu INTEGER, pocet_sad INTEGER,
+        klikov_na_far_spolu INTEGER, far_klikov INTEGER,
+        vkladacky_ano_nie INTEGER, vkladacky_text TEXT, pocet_th_obalky TEXT,
+        ako_vkladat TEXT, na_far TEXT, pdftk_cb_tlac TEXT, pdftk_vkladacky TEXT,
+        pdftk_komplet TEXT, pdftk_komplet_kratky TEXT, cb_strany_pocet TEXT,
+        cb_strany TEXT, cb_na_cb_pocet TEXT, cb_na_far_pocet TEXT,
+        na_cb_pocet TEXT, far_strany_pocet TEXT, na_far_pocet TEXT,
+        klk_na_cb TEXT, polozka_expedovat INTEGER, polozka_expedovat_datum TEXT,
+        komu_dodat TEXT, polozka_kde_vyzdvihnut TEXT, filter_vazba_retazec TEXT,
+        zhrnuty_text_vyradovaca TEXT, id_produktu_db INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS faktury (
+        id INTEGER PRIMARY KEY, cislo_faktury TEXT, datum_vystavenia TEXT,
+        odberatel TEXT, popis TEXT, suma_bez_dph REAL, suma_s_dph REAL,
+        suma_k_uhrade REAL, datum_splatnosti TEXT, zostava_uhradit REAL,
+        dni_po_splatnosti INTEGER, datum_uhrady TEXT
+    );
+    CREATE TABLE IF NOT EXISTS zakaznici (
+        id INTEGER PRIMARY KEY, customer_name TEXT, customer_street TEXT,
+        customer_zipcode TEXT, customer_city TEXT, customer_email TEXT,
+        customer_phone TEXT
+    );
+    CREATE TABLE IF NOT EXISTS kredity (
+        id INTEGER PRIMARY KEY, bankid REAL, acctid REAL, iban TEXT,
+        dtstart REAL, dtend REAL, trntype TEXT, dtposted REAL, dtavail TEXT,
+        trnamt REAL, trnvasym TEXT, trncosym REAL, reference_e2e TEXT,
+        name TEXT, bankid2 REAL, acctid3 TEXT, iban4 TEXT, acctkey TEXT,
+        memo TEXT, currency TEXT, trnspsym TEXT, poznamka TEXT
+    );
+    CREATE TABLE IF NOT EXISTS vyradovanie (
+        id INTEGER PRIMARY KEY, format TEXT, vazba_typ TEXT, naklad INTEGER,
+        stran INTEGER, vn_jph REAL, vn_cph REAL, vn_jpk_cb_na_cb REAL,
+        vn_jpk_far REAL, vn_jpk_far_znizeny REAL, vn_jpk_cb_na_far REAL,
+        vn_cpk_cb_na_cb INTEGER, vn_cpk_far INTEGER, vn_cpk_cb_na_far TEXT,
+        vn_cpk INTEGER, strany_far_v_dok_pocet TEXT, far_strany_v_dokumente TEXT,
+        cb_strany_v_dokumente TEXT, pdftk_cb_tlac TEXT, pdftk_vkladacky TEXT,
+        pdftk_komplet TEXT, pdftk_komplet_kratky TEXT, pdftk_cb_na_far TEXT,
+        pdftk_far_na_far TEXT, cb_strany_pocet TEXT, cb_strany TEXT,
+        far_strany_pocet TEXT, na_far_pocet TEXT, klk_na_cb TEXT,
+        ako_vkladat TEXT, cb_klikov_na_far_spolu INTEGER, pocet_sad INTEGER,
+        klikov_na_far_spolu INTEGER, far_klikov INTEGER, pocet_stran_far INTEGER,
+        na_far TEXT, retazec_specifikacie TEXT, shuffle_string TEXT,
+        pocet_stran_vts INTEGER, pocet_stran_do_shuffle INTEGER,
+        produkcii INTEGER, produkcii_vstup TEXT, bookletova_tlac INTEGER,
+        far_strany_vts TEXT, cb_strany_vts TEXT, pocet_cb_stran_vts INTEGER,
+        modulo REAL, statistika TEXT, rozsah_stran_vts TEXT,
+        oznacenie_zloziek_v_indd TEXT, rozpis_stran_v_zlozkach TEXT,
+        strany_od_do TEXT, test1 TEXT, test2 TEXT, test3 TEXT,
+        strany_na_th TEXT, vn_kliky_spolu_v REAL, typ_vyradenia TEXT
+    );
+    CREATE TABLE IF NOT EXISTS stav_projektov (id INTEGER PRIMARY KEY, nazov TEXT);
+    CREATE TABLE IF NOT EXISTS status_polozky (id INTEGER PRIMARY KEY, nazov TEXT);
+    CREATE TABLE IF NOT EXISTS typ_zakazky (id INTEGER PRIMARY KEY, nazov TEXT);
+    CREATE TABLE IF NOT EXISTS vazby (id INTEGER PRIMARY KEY, vazba TEXT, popis TEXT);
+    CREATE TABLE IF NOT EXISTS povrchova_uprava (id INTEGER PRIMARY KEY, nazov TEXT, skratka TEXT);
+    CREATE TABLE IF NOT EXISTS sadzba_dph (id INTEGER PRIMARY KEY, sadzba REAL);
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY, username TEXT, plne_meno TEXT,
+        aktualny_projekt INTEGER, vynutit_stav INTEGER, verzia_db TEXT
+    );
+    CREATE TABLE IF NOT EXISTS podfilter_projektov (id INTEGER PRIMARY KEY, nazov TEXT);
+    CREATE TABLE IF NOT EXISTS typ_odmeny (id INTEGER PRIMARY KEY, nazov TEXT);
+    """)
+
+
 def run():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+
+    print("Initializing database tables...")
+    init_tables(c)
+    conn.commit()
 
     # Projects
     print("Importing projects...")
