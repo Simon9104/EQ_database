@@ -4,7 +4,8 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models import (
     StavProjektu, StatusPolozky, TypZakazky, Vazba,
-    PovrchovaUprava, SadzbaDPH, User, PodfilterProjektu, TypOdmeny
+    PovrchovaUprava, SadzbaDPH, User, PodfilterProjektu, TypOdmeny,
+    TypNakladu, ObalkaCena
 )
 
 router = APIRouter(prefix="/api/lookups", tags=["lookups"])
@@ -27,6 +28,8 @@ async def get_all_lookups(db: AsyncSession = Depends(get_db)):
         "users": await fetch(User),
         "podfilter_projektov": await fetch(PodfilterProjektu),
         "typy_odmeny": await fetch(TypOdmeny),
+        "typy_nakladov": await fetch(TypNakladu),
+        "obalka_ceny": await fetch(ObalkaCena),
     }
 
 
@@ -71,6 +74,8 @@ def make_crud(model, prefix):
     return sub
 
 
+typ_nakladov_router = make_crud(TypNakladu, "typy-nakladov")
+obalka_ceny_router = make_crud(ObalkaCena, "obalka-ceny")
 stavy_router = make_crud(StavProjektu, "stavy")
 status_polozky_router = make_crud(StatusPolozky, "status-polozky")
 typ_zakazky_router = make_crud(TypZakazky, "typy-zakaziek")

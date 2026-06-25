@@ -14,10 +14,11 @@
     <small id="current-user">—</small>
   </div>
   <nav>
-    <a data-view="projects" class="active"><span class="icon">📁</span> Projekty</a>
+    <a data-view="dashboard"><span class="icon">📊</span> Dashboard</a>
+    <a data-view="projects"><span class="icon">📁</span> Projekty</a>
     <a data-view="items"><span class="icon">📋</span> Položky</a>
     <a data-view="invoices"><span class="icon">🧾</span> Faktúry</a>
-    <a data-view="customers"><span class="icon">👥</span> Zákazníci</a>
+    <a data-view="firmy"><span class="icon">🏢</span> Firmy</a>
     <a data-view="credits"><span class="icon">🏦</span> Bankové pohyby</a>
     <a data-view="imposition"><span class="icon">📄</span> Vyradovanie</a>
     <a data-view="settings"><span class="icon">⚙️</span> Nastavenia</a>
@@ -27,8 +28,12 @@
 
 <div id="main">
   <div id="topbar">
-    <h2 id="topbar-title">Projekty</h2>
-    <button class="btn btn-primary" id="add-btn" onclick="App.openAdd()">+ Pridať</button>
+    <h2 id="topbar-title">Dashboard</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="search" id="global-search" placeholder="🔍 Hľadať..." style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px;outline:none" autocomplete="off">
+      <button class="btn btn-secondary btn-sm" id="export-btn" style="display:none" onclick="App.exportCurrent()">↓ Export CSV</button>
+      <button class="btn btn-primary" id="add-btn" style="display:none" onclick="App.openAdd()">+ Pridať</button>
+    </div>
   </div>
   <div id="content">
     <div class="loading">Načítavam...</div>
@@ -60,6 +65,9 @@
     </div>
   </div>
 </div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
 
 <script src="/static/app.js"></script>
 </body>

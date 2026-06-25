@@ -2,6 +2,77 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, 
 from app.database import Base
 
 
+class Firma(Base):
+    __tablename__ = "firmy"
+    id = Column(Integer, primary_key=True, index=True)
+    nazov = Column(String(255), index=True)
+    skratka = Column(String(50))
+    adresa = Column(String(255))
+    mesto = Column(String(100))
+    psc = Column(String(20))
+    stat = Column(String(50))
+    telefon = Column(String(50))
+    email = Column(String(255))
+    fax = Column(String(50))
+    ico = Column(String(30))
+    ic_dph = Column(String(30))
+    dic = Column(String(30))
+    cislo_uctu = Column(String(100))
+    platca_dph = Column(Boolean, default=False)
+    agentura = Column(Boolean, default=False)
+    odberatel = Column(Boolean, default=True)
+    dodavatel = Column(Boolean, default=False)
+    webova_stranka = Column(String(255))
+    poznamka = Column(Text)
+
+
+class Kontakt(Base):
+    __tablename__ = "kontakty"
+    id = Column(Integer, primary_key=True, index=True)
+    firma_id = Column(Integer, index=True)
+    priezvisko = Column(String(100))
+    meno = Column(String(100))
+    funkcia = Column(String(100))
+    oddelenie = Column(String(100))
+    telefon_praca = Column(String(50))
+    mobil1 = Column(String(50))
+    mobil2 = Column(String(50))
+    email = Column(String(255))
+    poznamky = Column(Text)
+
+
+class Naklad(Base):
+    __tablename__ = "naklady"
+    id = Column(Integer, primary_key=True, index=True)
+    id_projektu = Column(Integer, index=True)
+    popis = Column(String(255))
+    mj = Column(String(20))
+    pocet = Column(Float, default=0)
+    jc_vyroba = Column(Float, default=0)
+    vyroba = Column(Float, default=0)
+    id_dodavatel = Column(Integer)
+    hotovo = Column(Boolean, default=False)
+    skontrolovane = Column(Boolean, default=False)
+    kedy_skontrolovane = Column(DateTime)
+    objednavka = Column(String(255))
+    poznamka = Column(Text)
+    kde_je = Column(String(255))
+    typ_nakladu = Column(String(50))
+
+
+class TypNakladu(Base):
+    __tablename__ = "typ_nakladov"
+    id = Column(Integer, primary_key=True)
+    nazov = Column(String(50))
+
+
+class ObalkaCena(Base):
+    __tablename__ = "obalka_ceny"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    farebnost = Column(String(20))
+    jcv = Column(Float, default=0)
+
+
 class Project(Base):
     __tablename__ = "projekty"
     id = Column(Integer, primary_key=True, index=True)
