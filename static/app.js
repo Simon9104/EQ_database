@@ -569,13 +569,13 @@ Views.projects = {
     const body = `
       ${othersHtml}
       <div class="tabs">
-        <span class="tab active" onclick="switchTab(this,'tab-basic')">Základné</span>
-        <span class="tab" onclick="switchTab(this,'tab-items')">Položky (${items.length})</span>
+        <span class="tab ${items.length ? '' : 'active'}" onclick="switchTab(this,'tab-basic')">Základné</span>
+        <span class="tab ${items.length ? 'active' : ''}" onclick="switchTab(this,'tab-items')">Položky (${items.length})</span>
         <span class="tab" onclick="Views.projects.loadNaklady(${id},this)">Náklady</span>
         <span class="tab" onclick="switchTab(this,'tab-notes')">Poznámky</span>
         <span class="tab" onclick="switchTab(this,'tab-log')">Log</span>
       </div>
-      <div id="tab-basic">
+      <div id="tab-basic" style="${items.length ? 'display:none' : ''}">
         <div class="detail-grid">
           ${dfield('ID',p.id)} ${dfield('Stav',statusBadge(p.stav))}
           ${dfield('Firma',p.nazov_firmy)} ${dfield('Kontakt',p.priezvisko_meno)}
@@ -603,8 +603,8 @@ Views.projects = {
         </div>
         ${p.strucna_specifikacia ? `<div class="detail-section"><h4>Stručná špecifikácia</h4><p style="font-size:13px">${esc(p.strucna_specifikacia)}</p></div>` : ''}
       </div>
-      <div id="tab-items" style="display:none">
-        ${items.length ? itemsTable(items) : '<div class="empty">Žiadne položky</div>'}
+      <div id="tab-items" style="${items.length ? '' : 'display:none'}">
+        ${items.length ? itemsTableQuick(items) : '<div class="empty">Žiadne položky</div>'}
         <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.items.openAddForProject(${p.id})">+ Pridať položku</button>
       </div>
       <div id="tab-naklady" style="display:none"><div class="loading">Načítavam...</div></div>
@@ -1009,6 +1009,11 @@ Views.items = {
     App.closeModal();
     App.closeDetail();
     await this.load();
+  },
+
+  async quickStatus(itemId, newStatus) {
+    await API.put('/api/items/' + itemId, { status: newStatus });
+    App.toast('Status: ' + newStatus, 'success');
   },
 };
 
@@ -1781,17 +1786,26 @@ function projFlags(p) {
   return `<div class="flags">${on.join('')}</div>`;
 }
 function itemsTable(items) {
-  return `<div class="table-wrap"><table>
-    <thead><tr><th>ID</th><th>Popis</th><th>MJ</th><th>Počet</th><th>Cena</th><th>s DPH</th><th>Status</th><th>Fak.</th></tr></thead>
-    <tbody>${items.map(i => `<tr>
-      <td class="mono">${i.id}</td>
-      <td class="td-truncate">${esc(i.popis||'')}</td>
-      <td>${esc(i.mj||'')}</td>
-      <td>${i.pocet??''}</td>
-      <td class="cur">${fmt_eur(i.cena)}</td>
-      <td class="cur">${fmt_eur(i.cena_s_dph)}</td>
-      <td>${statusBadge(i.status)}</td>
-      <td>${i.fakturovane?'✅':i.fakturovat?'○':''}</td>
+  return itemsTableQuick(items);
+}
+
+function itemsTableQuick(items) {
+  const statusOpts = (State.lookups.status_polozky || []).map(s =>
+    `<option value="${esc(s.nazov)}">${esc(s.nazov)}</option>`).join('');
+  return `<div class="table-wrap"><table class="items-quick-table">
+    <thead><tr><th>Popis</th><th>Počet</th><th>s DPH</th><th>Status</th><th>Fak.</th><th></th></tr></thead>
+    <tbody>${items.map(i => `<tr class="item-row" title="Klikni pre editáciu">
+      <td class="td-truncate" style="cursor:pointer;font-weight:500" onclick="Views.items.openEdit(${i.id})">${esc(i.popis||'—')}</td>
+      <td style="cursor:pointer" onclick="Views.items.openEdit(${i.id})">${i.pocet??''} ${esc(i.mj||'')}</td>
+      <td class="cur" style="cursor:pointer" onclick="Views.items.openEdit(${i.id})">${fmt_eur(i.cena_s_dph)}</td>
+      <td>
+        <select class="item-status-select" data-id="${i.id}" onchange="Views.items.quickStatus(${i.id},this.value)" onclick="event.stopPropagation()">
+          <option value="${esc(i.status||'')}" selected>${esc(i.status||'—')}</option>
+          ${statusOpts}
+        </select>
+      </td>
+      <td style="text-align:center">${i.fakturovane?'✅':i.fakturovat?'<span style="color:#e89900">○</span>':''}</td>
+      <td><button class="btn btn-sm btn-secondary" style="padding:2px 8px" onclick="event.stopPropagation();Views.items.openEdit(${i.id})">✏️</button></td>
     </tr>`).join('')}
     </tbody></table></div>`;
 }
