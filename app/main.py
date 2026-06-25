@@ -8,7 +8,7 @@ from sqlalchemy import select, func
 from app.database import init_db, get_db
 from app.models import Project, Invoice, Customer
 from app.routers import projects, items, invoices, customers, credits, imposition, lookups
-from app.routers import firmy, kontakty, naklady, iqk
+from app.routers import firmy, kontakty, naklady, iqk, bank
 import csv, io
 
 
@@ -49,6 +49,7 @@ app.include_router(firmy.router)
 app.include_router(kontakty.router)
 app.include_router(naklady.router)
 app.include_router(iqk.router)
+app.include_router(bank.router)
 app.include_router(lookups.jazyky_iqk_router)
 app.include_router(lookups.hviezdicky_router)
 
