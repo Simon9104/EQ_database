@@ -10,6 +10,8 @@ from app.models import (
 
 router = APIRouter(prefix="/api/lookups", tags=["lookups"])
 
+SAFE_USER_FIELDS = {"id", "username", "plne_meno", "aktualny_projekt", "vynutit_stav", "is_admin", "active"}
+
 
 @router.get("")
 async def get_all_lookups(db: AsyncSession = Depends(get_db)):
@@ -18,6 +20,11 @@ async def get_all_lookups(db: AsyncSession = Depends(get_db)):
         rows = r.scalars().all()
         return [row.__dict__ for row in rows]
 
+    async def fetch_users():
+        r = await db.execute(select(User))
+        rows = r.scalars().all()
+        return [{k: v for k, v in row.__dict__.items() if k in SAFE_USER_FIELDS} for row in rows]
+
     return {
         "stavy_projektov": await fetch(StavProjektu),
         "status_polozky": await fetch(StatusPolozky),
@@ -25,7 +32,7 @@ async def get_all_lookups(db: AsyncSession = Depends(get_db)):
         "vazby": await fetch(Vazba),
         "povrchova_uprava": await fetch(PovrchovaUprava),
         "sadzby_dph": await fetch(SadzbaDPH),
-        "users": await fetch(User),
+        "users": await fetch_users(),
         "podfilter_projektov": await fetch(PodfilterProjektu),
         "typy_odmeny": await fetch(TypOdmeny),
         "typy_nakladov": await fetch(TypNakladu),

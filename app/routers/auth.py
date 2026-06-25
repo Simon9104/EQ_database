@@ -134,6 +134,26 @@ async def toggle_active(uid: int, admin: User = Depends(get_admin_user), db: Asy
     return {"ok": True, "active": user.active}
 
 
+@router.post("/set-active-project")
+async def set_active_project(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Track which project the current user has open."""
+    result = await db.execute(select(User).where(User.id == user.id))
+    u = result.scalar_one()
+    u.aktualny_projekt = data.get("projekt_id")
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/active-users")
+async def active_users(db: AsyncSession = Depends(get_db)):
+    """Return users with an active project open (for multi-user awareness)."""
+    result = await db.execute(
+        select(User).where(User.active == True, User.aktualny_projekt != None)
+    )
+    users = result.scalars().all()
+    return [{"id": u.id, "username": u.username, "plne_meno": u.plne_meno, "aktualny_projekt": u.aktualny_projekt} for u in users]
+
+
 @router.post("/change-password")
 async def change_password(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     old = data.get("old_password") or ""

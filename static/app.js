@@ -558,7 +558,16 @@ Views.projects = {
   async openDetail(id) {
     const p = await API.get('/api/projects/' + id);
     const items = await API.get('/api/projects/' + id + '/items');
+    // Track which project this user has open
+    API.post('/api/auth/set-active-project', { projekt_id: id }).catch(() => {});
+    // Who else has this project open?
+    const activeUsers = await API.get('/api/auth/active-users');
+    const others = (activeUsers || []).filter(u => u.aktualny_projekt === id && u.id !== State.currentUser?.id);
+    const othersHtml = others.length
+      ? `<div class="multi-user-badge">👥 Otvorené aj: ${others.map(u => esc(u.plne_meno || u.username)).join(', ')}</div>`
+      : '';
     const body = `
+      ${othersHtml}
       <div class="tabs">
         <span class="tab active" onclick="switchTab(this,'tab-basic')">Základné</span>
         <span class="tab" onclick="switchTab(this,'tab-items')">Položky (${items.length})</span>
