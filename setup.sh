@@ -12,6 +12,18 @@ if [ ! -f "$DB" ]; then
   exit 1
 fi
 
+# Check for mdbtools
+if ! command -v mdb-export &>/dev/null; then
+  echo "ERROR: mdbtools is not installed."
+  echo ""
+  echo "Install it with:"
+  echo "  Ubuntu/Debian:  sudo apt-get install mdbtools"
+  echo "  macOS:          brew install mdbtools"
+  echo "  Fedora/RHEL:    sudo dnf install mdbtools"
+  echo ""
+  exit 1
+fi
+
 echo "Exporting tables from Access database..."
 mdb-export "$DB" "DocasnaTabulkaProjekty" > /tmp/projects.csv
 mdb-export "$DB" "DocasnaTabulkaPolozky"  > /tmp/polozky.csv
