@@ -112,6 +112,51 @@ async def set_password(uid: int, data: dict, admin: User = Depends(get_admin_use
     return {"ok": True}
 
 
+@router.post("/users")
+async def create_user(data: dict, admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
+    username = (data.get("username") or "").strip()
+    plne_meno = (data.get("plne_meno") or "").strip()
+    password = data.get("password") or ""
+    if not username:
+        raise HTTPException(400, "Meno používateľa je povinné")
+    existing = await db.execute(select(User).where(User.username == username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(400, f"Používateľ '{username}' už existuje")
+    if password and len(password) < 4:
+        raise HTTPException(400, "Heslo musí mať aspoň 4 znaky")
+    user = User(
+        username=username,
+        plne_meno=plne_meno or username,
+        password_hash=hash_password(password) if password else None,
+        is_admin=bool(data.get("is_admin")),
+        active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return {"ok": True, "id": user.id, "username": user.username}
+
+
+@router.put("/users/{uid}")
+async def update_user(uid: int, data: dict, admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == uid))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "Používateľ nenájdený")
+    if "username" in data:
+        username = (data["username"] or "").strip()
+        if not username:
+            raise HTTPException(400, "Meno používateľa je povinné")
+        conflict = await db.execute(select(User).where(User.username == username, User.id != uid))
+        if conflict.scalar_one_or_none():
+            raise HTTPException(400, f"Používateľ '{username}' už existuje")
+        user.username = username
+    if "plne_meno" in data:
+        user.plne_meno = (data["plne_meno"] or "").strip()
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/users/{uid}/toggle-admin")
 async def toggle_admin(uid: int, admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.id == uid))
