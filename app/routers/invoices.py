@@ -160,6 +160,26 @@ def _fmt_num(val, decimals=2) -> str:
     return f"{val:,.{decimals}f}".replace(",", " ").replace(".", ",")
 
 
+def _register_fonts():
+    """Register Liberation Sans TTF for full Unicode/Slovak support. Cached after first call."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import os
+    if "LiberationSans" in pdfmetrics.getRegisteredFontNames():
+        return
+    base = "/usr/share/fonts/truetype/liberation"
+    try:
+        pdfmetrics.registerFont(TTFont("LiberationSans", f"{base}/LiberationSans-Regular.ttf"))
+        pdfmetrics.registerFont(TTFont("LiberationSans-Bold", f"{base}/LiberationSans-Bold.ttf"))
+        pdfmetrics.registerFont(TTFont("LiberationSans-Italic", f"{base}/LiberationSans-Italic.ttf"))
+        from reportlab.pdfbase.pdfmetrics import registerFontFamily
+        registerFontFamily("LiberationSans",
+            normal="LiberationSans", bold="LiberationSans-Bold",
+            italic="LiberationSans-Italic", boldItalic="LiberationSans-Bold")
+    except Exception:
+        pass  # Fallback to Helvetica if fonts not found
+
+
 def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -169,7 +189,12 @@ def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+    from reportlab.pdfbase import pdfmetrics
     import os
+
+    _register_fonts()
+    FONT = "LiberationSans" if "LiberationSans" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
+    FONT_BOLD = f"{FONT}-Bold" if FONT == "LiberationSans" else "Helvetica-Bold"
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -182,8 +207,8 @@ def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
     W = A4[0] - 30*mm  # usable width
 
     def style(name="Normal", **kw):
-        base = styles[name]
-        s = ParagraphStyle(name + "_custom", parent=base, **kw)
+        kw.setdefault("fontName", FONT)
+        s = ParagraphStyle(name + "_" + str(id(kw)), parent=styles[name], **kw)
         return s
 
     DARK = colors.HexColor("#1a2b45")
@@ -302,8 +327,9 @@ def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
     )
     meta_table.setStyle(TableStyle([
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, -1), FONT),
+        ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
+        ("FONTNAME", (2, 0), (2, -1), FONT_BOLD),
         ("TEXTCOLOR", (0, 0), (0, -1), DARK),
         ("TEXTCOLOR", (2, 0), (2, -1), DARK),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -347,7 +373,8 @@ def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
         items_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), DARK),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 0), (-1, -1), FONT),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
             ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -366,15 +393,16 @@ def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
     story.append(Spacer(1, 5*mm))
 
     # ── Totals ────────────────────────────────────────────────────────────────
+    # In this DB: suma_bez_dph = base, suma_s_dph = VAT amount, suma_k_uhrade = total
     suma_bez = inv.suma_bez_dph or 0
-    suma_dph = (inv.suma_s_dph or 0) - suma_bez
-    suma_s = inv.suma_s_dph or 0
-    k_uhrade = inv.suma_k_uhrade or suma_s
+    suma_dph = inv.suma_s_dph or 0          # stored as VAT amount, not total
+    k_uhrade = inv.suma_k_uhrade or (suma_bez + suma_dph)
+    suma_celkom = suma_bez + suma_dph        # reconstruct total
 
     totals_data = [
         ["Základ DPH:", f"{_fmt_num(suma_bez)} €"],
         ["DPH:", f"{_fmt_num(suma_dph)} €"],
-        ["Celkom s DPH:", f"{_fmt_num(suma_s)} €"],
+        ["Celkom s DPH:", f"{_fmt_num(suma_celkom)} €"],
         ["K úhrade:", f"{_fmt_num(k_uhrade)} €"],
     ]
     totals_table = Table(
@@ -383,9 +411,10 @@ def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
     )
     totals_table.setStyle(TableStyle([
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
+        ("FONTNAME", (1, 0), (1, -1), FONT),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("FONTNAME", (0, 3), (-1, 3), "Helvetica-Bold"),
+        ("FONTNAME", (0, 3), (-1, 3), FONT_BOLD),
         ("FONTSIZE", (0, 3), (-1, 3), 11),
         ("TEXTCOLOR", (0, 3), (-1, 3), ACCENT),
         ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#eff6ff")),
