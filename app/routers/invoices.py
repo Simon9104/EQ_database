@@ -161,23 +161,24 @@ def _fmt_num(val, decimals=2) -> str:
 
 
 def _register_fonts():
-    """Register Liberation Sans TTF for full Unicode/Slovak support. Cached after first call."""
+    """Register DejaVu Sans TTF (bundled in static/fonts/) for full Unicode/Slovak support."""
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfbase.pdfmetrics import registerFontFamily
     import os
-    if "LiberationSans" in pdfmetrics.getRegisteredFontNames():
+    if "DejaVuSans" in pdfmetrics.getRegisteredFontNames():
         return
-    base = "/usr/share/fonts/truetype/liberation"
-    try:
-        pdfmetrics.registerFont(TTFont("LiberationSans", f"{base}/LiberationSans-Regular.ttf"))
-        pdfmetrics.registerFont(TTFont("LiberationSans-Bold", f"{base}/LiberationSans-Bold.ttf"))
-        pdfmetrics.registerFont(TTFont("LiberationSans-Italic", f"{base}/LiberationSans-Italic.ttf"))
-        from reportlab.pdfbase.pdfmetrics import registerFontFamily
-        registerFontFamily("LiberationSans",
-            normal="LiberationSans", bold="LiberationSans-Bold",
-            italic="LiberationSans-Italic", boldItalic="LiberationSans-Bold")
-    except Exception:
-        pass  # Fallback to Helvetica if fonts not found
+    # Bundled fonts — works on any platform (Linux, macOS, Windows)
+    font_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static", "fonts")
+    font_dir = os.path.abspath(font_dir)
+    regular = os.path.join(font_dir, "DejaVuSans.ttf")
+    bold = os.path.join(font_dir, "DejaVuSans-Bold.ttf")
+    if not os.path.exists(regular):
+        return  # fonts not bundled, will fall back to Helvetica
+    pdfmetrics.registerFont(TTFont("DejaVuSans", regular))
+    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold))
+    registerFontFamily("DejaVuSans", normal="DejaVuSans", bold="DejaVuSans-Bold",
+                       italic="DejaVuSans", boldItalic="DejaVuSans-Bold")
 
 
 def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
@@ -193,8 +194,8 @@ def _build_pdf(inv, ud, firma, items, projekt) -> bytes:
     import os
 
     _register_fonts()
-    FONT = "LiberationSans" if "LiberationSans" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
-    FONT_BOLD = f"{FONT}-Bold" if FONT == "LiberationSans" else "Helvetica-Bold"
+    FONT = "DejaVuSans" if "DejaVuSans" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
+    FONT_BOLD = "DejaVuSans-Bold" if FONT == "DejaVuSans" else "Helvetica-Bold"
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
