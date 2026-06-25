@@ -228,6 +228,34 @@ class Invoice(Base):
     zostava_uhradit = Column(Float, default=0)
     dni_po_splatnosti = Column(Integer)
     datum_uhrady = Column(DateTime)
+    # Links and extended fields
+    id_projektu = Column(Integer, index=True)
+    firma_id = Column(Integer, index=True)
+    vs = Column(String(50))
+    forma_uhrady = Column(String(50))
+    iban = Column(String(100))
+    swift = Column(String(30))
+    poznamka = Column(Text)
+
+
+class FiremneUdaje(Base):
+    """Supplier (dodávateľ) details used on PDF invoices — single row."""
+    __tablename__ = "firemne_udaje"
+    id = Column(Integer, primary_key=True, default=1)
+    nazov = Column(String(255))
+    adresa = Column(String(255))
+    mesto = Column(String(100))
+    psc = Column(String(20))
+    ico = Column(String(30))
+    ic_dph = Column(String(30))
+    dic = Column(String(30))
+    iban = Column(String(100))
+    swift = Column(String(30))
+    banka = Column(String(100))
+    telefon = Column(String(50))
+    email = Column(String(255))
+    web = Column(String(255))
+    poznamka_fa = Column(Text)
 
 
 class Customer(Base):
@@ -327,6 +355,8 @@ class Imposition(Base):
     strany_na_th = Column(Text)
     vn_kliky_spolu_v = Column(Float)
     typ_vyradenia = Column(Text)
+    id_projektu = Column(Integer, index=True)
+    id_polozky = Column(Integer, index=True)
 
 
 # Lookup tables

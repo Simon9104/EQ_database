@@ -7,9 +7,9 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.database import init_db, get_db
-from app.models import Project, Invoice, Customer
+from app.models import Project, Invoice, Customer, FiremneUdaje  # noqa: F401 — needed for create_all
 from app.routers import projects, items, invoices, customers, credits, imposition, lookups
-from app.routers import firmy, kontakty, naklady, iqk, bank, auth
+from app.routers import firmy, kontakty, naklady, iqk, bank, auth, firemne_udaje
 from app.database import AsyncSessionLocal
 import csv, io, time
 from collections import defaultdict
@@ -93,6 +93,7 @@ app.include_router(naklady.router)
 app.include_router(iqk.router)
 app.include_router(bank.router)
 app.include_router(auth.router)
+app.include_router(firemne_udaje.router)
 app.include_router(lookups.jazyky_iqk_router)
 app.include_router(lookups.hviezdicky_router)
 
