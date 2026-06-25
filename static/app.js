@@ -4,6 +4,11 @@
 const API = {
   async _handle(r) {
     if (r.status === 401) { window.location.href = '/login'; return null; }
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { const j = await r.json(); msg = j.detail || j.error || msg; } catch {}
+      throw new Error(msg);
+    }
     return r.json();
   },
   async get(url) { return this._handle(await fetch(url)); },
@@ -1624,12 +1629,20 @@ Views.imposition = {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Generujem...'; }
     try {
       const updated = await API.post(`/api/imposition/${id}/generate`, {});
-      // Refresh local state
+      if (!updated || updated.error || updated.detail) {
+        alert('Chyba: ' + (updated?.error || updated?.detail || 'neznáma chyba'));
+        if (btn) { btn.disabled = false; btn.textContent = '⚙ Generovať'; }
+        return;
+      }
+      // Update local state
+      if (!State.imposition) State.imposition = { data: [] };
       const idx = State.imposition.data.findIndex(x => x.id === id);
       if (idx >= 0) State.imposition.data[idx] = updated;
+      else State.imposition.data.push(updated);
       this.openDetail(id);
     } catch(e) {
       alert('Chyba pri generovaní: ' + (e.message || e));
+      if (btn) { btn.disabled = false; btn.textContent = '⚙ Generovať'; }
     }
   },
 };
