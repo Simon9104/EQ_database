@@ -40,6 +40,9 @@ mdb-export "$DB" "Podfilter projektov"    > /tmp/podfilter.csv
 mdb-export "$DB" "TypOdmenyIQK"           > /tmp/typ_odmeny.csv
 mdb-export "$DB" "Sadzba DPH"             > /tmp/dph.csv
 mdb-export "$DB" "Vazby"                  > /tmp/vazby.csv
+mdb-export "$DB" "JazykyIQK"             > /tmp/jazyky_iqk.csv
+mdb-export "$DB" "Hviezdicky"            > /tmp/hviezdicky.csv
+mdb-export "$DB" "TestPolozky"           > /tmp/testpolozky.csv
 
 echo "Importing into SQLite..."
 python import_data.py

@@ -166,6 +166,29 @@ def init_tables(c):
     );
     CREATE TABLE IF NOT EXISTS typ_nakladov (id INTEGER PRIMARY KEY, nazov TEXT);
     CREATE TABLE IF NOT EXISTS obalka_ceny (id INTEGER PRIMARY KEY AUTOINCREMENT, farebnost TEXT, jcv REAL);
+    CREATE TABLE IF NOT EXISTS jazyky_iqk (
+        id INTEGER PRIMARY KEY, jazyk_vydania TEXT, jazyk_konkretne TEXT, jazyk_preklad TEXT
+    );
+    CREATE TABLE IF NOT EXISTS hviezdicky (id INTEGER PRIMARY KEY, znak TEXT);
+    CREATE TABLE IF NOT EXISTS iqk_produkty (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, nazov TEXT, isbn TEXT, autor TEXT,
+        vydavatel TEXT, rok_vydania INTEGER, jazyk_id INTEGER,
+        pocet_stran INTEGER, naklad INTEGER, cena_bez_dph REAL,
+        sadzba_dph REAL DEFAULT 0.1, cena_s_dph REAL, poznamka TEXT,
+        aktualny_stav INTEGER DEFAULT 0, firma_id INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS iqk_sklady (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, produkt_id INTEGER,
+        dodane INTEGER DEFAULT 0, predane INTEGER DEFAULT 0,
+        vykupene INTEGER DEFAULT 0, zostatok INTEGER DEFAULT 0,
+        datum TEXT, poznamka TEXT
+    );
+    CREATE TABLE IF NOT EXISTS iqk_transakcie (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, produkt_id INTEGER, firma_id INTEGER,
+        typ_transakcie TEXT, mnozstvo INTEGER DEFAULT 0, jc REAL, suma REAL,
+        datum TEXT, typ_odmeny TEXT, poznamka TEXT,
+        fakturovat INTEGER DEFAULT 0, fakturovane INTEGER DEFAULT 0
+    );
     """)
 
 
@@ -625,6 +648,28 @@ def run():
         ))
     conn.commit()
     print(f"  vazby: {len(rows)} rows")
+
+    # JazykyIQK
+    rows = read_csv("/tmp/jazyky_iqk.csv")
+    for r in rows:
+        c.execute("INSERT OR REPLACE INTO jazyky_iqk (id, jazyk_vydania, jazyk_konkretne, jazyk_preklad) VALUES (?,?,?,?)", (
+            parse_int(r.get("JazykID")),
+            r.get("JazykVydania", ""),
+            r.get("JazykKonkretne", ""),
+            r.get("JazykPreklad", ""),
+        ))
+    conn.commit()
+    print(f"  jazyky_iqk: {len(rows)} rows")
+
+    # Hviezdicky
+    rows = read_csv("/tmp/hviezdicky.csv")
+    for r in rows:
+        c.execute("INSERT OR REPLACE INTO hviezdicky (id, znak) VALUES (?,?)", (
+            parse_int(r.get("Identifikácia")),
+            r.get("Znak", ""),
+        ))
+    conn.commit()
+    print(f"  hviezdicky: {len(rows)} rows")
 
     conn.close()
     print("\nImport complete.")
