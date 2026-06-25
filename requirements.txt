@@ -4,5 +4,5 @@ sqlalchemy
 aiosqlite
 python-multipart
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt
 pdfplumber

@@ -1,11 +1,10 @@
 import os
-import secrets
+import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, Cookie
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from passlib.context import CryptContext
 from jose import jwt, JWTError
 from app.database import get_db
 from app.models import User
@@ -16,15 +15,16 @@ SECRET_KEY = os.environ.get("EQ_SECRET_KEY", "eq-projekty-secret-change-in-produ
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 8
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode()[:72], bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode()[:72], hashed.encode())
+    except Exception:
+        return False
 
 
 def create_token(user_id: int, username: str) -> str:
