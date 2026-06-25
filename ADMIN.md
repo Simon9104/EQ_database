@@ -39,46 +39,82 @@ brew install mdbtools            # macOS
 
 ---
 
-## 2. Správa používateľov
+## 2. Správa používateľov (cez terminál servera)
 
-Prístupné cez **Nastavenia → Správa používateľov** (len admin).
+Všetka správa používateľov sa robí priamo cez SQLite na serveri. Vlastné heslo si každý používateľ môže zmeniť sám cez web (Nastavenia → Zmena hesla).
 
-### Prehľad používateľov
+### Zobrazenie všetkých používateľov
 
-Každý riadok zobrazuje:
-- **Meno / username** — meno importované z Access
-- **Admin / Používateľ** — úroveň prístupu
-- **Aktívny / Neaktívny** — neaktívny sa nemôže prihlásiť
-- **✅ má heslo / ⚠️ bez hesla** — bez hesla sa nedá prihlásiť
-
-### Nastavenie hesla novému používateľovi
-
-1. Nastavenia → Správa používateľov
-2. Kliknite **Nastaviť heslo** pri danom používateľovi
-3. Zadajte heslo (min. 4 znaky)
-4. Oznámte používateľovi jeho prihlasovacie meno a heslo
-
-### Udelenie / odobratie admin práv
-
-- Kliknite **Admin: Pridať** alebo **Admin: Odobrať**
-- Admin vidí správu používateľov a môže meniť heslá ostatným
-
-### Deaktivácia používateľa
-
-- Kliknite **Deaktivovať** — používateľ sa nemôže prihlásiť, ale jeho dáta zostávajú
-
-### Zmena vlastného hesla
-
-Nastavenia → Zmena hesla → staré heslo → nové heslo → zopakovať → **Zmeniť heslo**
-
-### Núdzový reset hesla (cez SQLite)
-
-Ak sa nikto nevie prihlásiť:
 ```bash
-sqlite3 eq_database.db "SELECT id, username, is_admin, active FROM users;"
+sqlite3 eq_database.db "SELECT id, username, plne_meno, is_admin, active, password_hash IS NOT NULL as ma_heslo FROM users;"
+```
+
+### Nastavenie hesla používateľovi
+
+Heslo sa musí zaheslovať — použite tento Python príkaz priamo na serveri:
+
+```bash
+python3 - <<'EOF'
+import bcrypt, sys
+username = input("Username: ")
+password = input("Nové heslo: ")
+h = bcrypt.hashpw(password.encode()[:72], bcrypt.gensalt()).decode()
+
+import sqlite3
+con = sqlite3.connect("eq_database.db")
+con.execute("UPDATE users SET password_hash=? WHERE username=?", (h, username))
+con.commit()
+rows = con.execute("SELECT changes()").fetchone()[0]
+con.close()
+print(f"Aktualizovaných riadkov: {rows}")
+EOF
+```
+
+Alebo ako jednoriadkový skript (zadajte priamo):
+```bash
+python3 -c "
+import bcrypt, sqlite3, getpass
+u = input('Username: ')
+p = getpass.getpass('Heslo: ')
+h = bcrypt.hashpw(p.encode()[:72], bcrypt.gensalt()).decode()
+con = sqlite3.connect('eq_database.db')
+con.execute('UPDATE users SET password_hash=? WHERE username=?', (h,u))
+con.commit(); con.close(); print('Hotovo')
+"
+```
+
+### Udelenie admin práv
+
+```bash
+sqlite3 eq_database.db "UPDATE users SET is_admin=1 WHERE username='meno';"
+```
+
+### Odobratie admin práv
+
+```bash
+sqlite3 eq_database.db "UPDATE users SET is_admin=0 WHERE username='meno';"
+```
+
+### Aktivácia / deaktivácia používateľa
+
+```bash
+# Deaktivácia – používateľ sa nemôže prihlásiť
+sqlite3 eq_database.db "UPDATE users SET active=0 WHERE username='meno';"
+
+# Aktivácia
+sqlite3 eq_database.db "UPDATE users SET active=1 WHERE username='meno';"
+```
+
+### Núdzový reset hesla (ak sa nikto nevie prihlásiť)
+
+```bash
 sqlite3 eq_database.db "UPDATE users SET password_hash=NULL WHERE id=1;"
 ```
-Reštartujte server — heslo sa automaticky resetuje na `admin`.
+Reštartujte server — heslo prvého používateľa sa automaticky resetuje na `admin`.
+
+### Zmena vlastného hesla (web)
+
+Každý prihlásený používateľ si môže zmeniť heslo sám: **Nastavenia → Zmena hesla**
 
 ---
 
