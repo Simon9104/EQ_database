@@ -83,6 +83,14 @@ con.commit(); con.close(); print('Hotovo')
 "
 ```
 
+### Zmena username
+
+```bash
+sqlite3 eq_database.db "UPDATE users SET username='nové_meno' WHERE username='staré_meno';"
+```
+
+Používateľ sa musí odhlásiť a znova prihlásiť s novým menom.
+
 ### Udelenie admin práv
 
 ```bash
