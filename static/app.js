@@ -1650,6 +1650,40 @@ Views.imposition = {
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 Views.settings = {
+  async save() {
+    const action = Views.settings._userModalAction;
+    if (action === 'add') {
+      const username = document.getElementById('au-username')?.value.trim();
+      const plne_meno = document.getElementById('au-plne_meno')?.value.trim();
+      const password = document.getElementById('au-password')?.value;
+      const is_admin = document.getElementById('au-is_admin')?.checked;
+      if (!username) { App.toast('Login je povinný', 'error'); return; }
+      try {
+        const r = await API.post('/api/auth/users', { username, plne_meno, password, is_admin });
+        if (r?.ok) { App.toast(`Používateľ ${username} vytvorený`, 'success'); App.closeModal(); Views.settings.render(); }
+      } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
+    } else if (action === 'edit') {
+      const uid = Views.settings._userModalUid;
+      const username = document.getElementById('eu-username')?.value.trim();
+      const plne_meno = document.getElementById('eu-plne_meno')?.value.trim();
+      if (!username) { App.toast('Login je povinný', 'error'); return; }
+      try {
+        const r = await API.put(`/api/auth/users/${uid}`, { username, plne_meno });
+        if (r?.ok) { App.toast('Používateľ aktualizovaný', 'success'); App.closeModal(); Views.settings.render(); }
+      } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
+    } else if (action === 'password') {
+      const uid = Views.settings._userModalUid;
+      const name = Views.settings._userModalName;
+      const pwd = document.getElementById('sp-pwd')?.value;
+      const pwd2 = document.getElementById('sp-pwd2')?.value;
+      if (pwd !== pwd2) { App.toast('Heslá sa nezhodujú', 'error'); return; }
+      try {
+        const r = await API.post(`/api/auth/users/${uid}/set-password`, { password: pwd });
+        if (r?.ok) { App.toast(`Heslo nastavené pre ${name}`, 'success'); App.closeModal(); }
+      } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
+    }
+  },
+
   async render() {
     const cont = document.getElementById('content');
     cont.innerHTML = '<div class="loading">Načítavam...</div>';
@@ -2228,41 +2262,20 @@ Views.settings.sectionUsers = async function() {
   </div>`;
 };
 
+Views.settings._userModalAction = null;
+
 Views.settings.addUser = function() {
   const body = `<div class="form-grid">
     <div class="field form-full"><label>Login (username) *</label><input id="au-username" placeholder="napr. jnovak" autocomplete="off"></div>
     <div class="field form-full"><label>Celé meno</label><input id="au-plne_meno" placeholder="napr. Ján Novák" autocomplete="off"></div>
     <div class="field form-full"><label>Heslo (min. 4 znaky, nechajte prázdne ak nastavíte neskôr)</label><input type="password" id="au-password" autocomplete="new-password"></div>
     <div class="field form-full" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="au-is_admin" style="width:auto">
-      <label for="au-is_admin" style="margin:0">Admin oprávnenia</label>
+      <input type="checkbox" id="au-is_admin" style="width:auto;margin:0">
+      <label for="au-is_admin" style="margin:0;font-weight:normal">Admin oprávnenia</label>
     </div>
   </div>`;
-  // Use a temporary modal via App.openModal trick — build custom modal
-  const overlay = document.getElementById('modal-overlay');
-  const modal = document.getElementById('modal');
-  document.getElementById('modal-title').textContent = 'Nový používateľ';
-  document.getElementById('modal-body').innerHTML = body;
-  document.getElementById('modal-save').onclick = Views.settings._saveNewUser;
-  document.getElementById('modal-delete-btn').style.display = 'none';
-  overlay.classList.add('open');
-  modal.classList.add('open');
-};
-
-Views.settings._saveNewUser = async function() {
-  const username = document.getElementById('au-username')?.value.trim();
-  const plne_meno = document.getElementById('au-plne_meno')?.value.trim();
-  const password = document.getElementById('au-password')?.value;
-  const is_admin = document.getElementById('au-is_admin')?.checked;
-  if (!username) { App.toast('Login je povinný', 'error'); return; }
-  try {
-    const r = await API.post('/api/auth/users', { username, plne_meno, password, is_admin });
-    if (r?.ok) {
-      App.toast(`Používateľ ${username} vytvorený`, 'success');
-      App.closeModal();
-      Views.settings.render();
-    }
-  } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
+  Views.settings._userModalAction = 'add';
+  App.openModal('Nový používateľ', body, null, false);
 };
 
 Views.settings.editUser = function(uid, username, plne_meno) {
@@ -2270,26 +2283,22 @@ Views.settings.editUser = function(uid, username, plne_meno) {
     <div class="field form-full"><label>Login (username) *</label><input id="eu-username" value="${esc(username)}" autocomplete="off"></div>
     <div class="field form-full"><label>Celé meno</label><input id="eu-plne_meno" value="${esc(plne_meno)}" autocomplete="off"></div>
   </div>`;
-  document.getElementById('modal-title').textContent = `Upraviť: ${username}`;
-  document.getElementById('modal-body').innerHTML = body;
-  document.getElementById('modal-save').onclick = () => Views.settings._saveEditUser(uid);
-  document.getElementById('modal-delete-btn').style.display = 'none';
-  document.getElementById('modal-overlay').classList.add('open');
-  document.getElementById('modal').classList.add('open');
+  Views.settings._userModalAction = 'edit';
+  Views.settings._userModalUid = uid;
+  App.openModal(`Upraviť: ${username}`, body, null, false);
 };
 
-Views.settings._saveEditUser = async function(uid) {
-  const username = document.getElementById('eu-username')?.value.trim();
-  const plne_meno = document.getElementById('eu-plne_meno')?.value.trim();
-  if (!username) { App.toast('Login je povinný', 'error'); return; }
-  try {
-    const r = await API.put(`/api/auth/users/${uid}`, { username, plne_meno });
-    if (r?.ok) {
-      App.toast('Používateľ aktualizovaný', 'success');
-      App.closeModal();
-      Views.settings.render();
-    }
-  } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
+Views.settings.setUserPassword = function(uid, username) {
+  const body = `<div class="form-grid">
+    <div class="field form-full"><label>Nové heslo pre <strong>${esc(username)}</strong> (min. 4 znaky)</label>
+      <input type="password" id="sp-pwd" autocomplete="new-password"></div>
+    <div class="field form-full"><label>Zopakovať heslo</label>
+      <input type="password" id="sp-pwd2" autocomplete="new-password"></div>
+  </div>`;
+  Views.settings._userModalAction = 'password';
+  Views.settings._userModalUid = uid;
+  Views.settings._userModalName = username;
+  App.openModal(`Nastaviť heslo: ${username}`, body, null, false);
 };
 
 Views.settings.sectionChangePassword = function() {
@@ -2304,29 +2313,6 @@ Views.settings.sectionChangePassword = function() {
       </div>
     </div>
   </div>`;
-};
-
-Views.settings.setUserPassword = function(uid, username) {
-  const body = `<div class="form-grid">
-    <div class="field form-full"><label>Nové heslo pre <strong>${esc(username)}</strong> (min. 4 znaky)</label>
-      <input type="password" id="sp-pwd" autocomplete="new-password"></div>
-    <div class="field form-full"><label>Zopakovať heslo</label>
-      <input type="password" id="sp-pwd2" autocomplete="new-password"></div>
-  </div>`;
-  document.getElementById('modal-title').textContent = `Nastaviť heslo: ${username}`;
-  document.getElementById('modal-body').innerHTML = body;
-  document.getElementById('modal-save').onclick = async () => {
-    const pwd = document.getElementById('sp-pwd')?.value;
-    const pwd2 = document.getElementById('sp-pwd2')?.value;
-    if (pwd !== pwd2) { App.toast('Heslá sa nezhodujú', 'error'); return; }
-    try {
-      const r = await API.post(`/api/auth/users/${uid}/set-password`, { password: pwd });
-      if (r?.ok) { App.toast(`Heslo nastavené pre ${username}`, 'success'); App.closeModal(); }
-    } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
-  };
-  document.getElementById('modal-delete-btn').style.display = 'none';
-  document.getElementById('modal-overlay').classList.add('open');
-  document.getElementById('modal').classList.add('open');
 };
 
 Views.settings.toggleAdmin = async function(uid) {
