@@ -2,22 +2,18 @@
 
 // ── API ─────────────────────────────────────────────────────────────────────
 const API = {
-  async get(url) {
-    const r = await fetch(url);
+  async _handle(r) {
+    if (r.status === 401) { window.location.href = '/login'; return null; }
     return r.json();
   },
+  async get(url) { return this._handle(await fetch(url)); },
   async post(url, data) {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    return r.json();
+    return this._handle(await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
   },
   async put(url, data) {
-    const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    return r.json();
+    return this._handle(await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
   },
-  async del(url) {
-    const r = await fetch(url, { method: 'DELETE' });
-    return r.json();
-  },
+  async del(url) { return this._handle(await fetch(url, { method: 'DELETE' })); },
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -90,9 +86,16 @@ const State = {
 // ── App ──────────────────────────────────────────────────────────────────────
 const App = {
   async init() {
+    // Load current user from auth
+    const me = await API.get('/api/auth/me');
+    if (!me) return; // redirected to login
+    State.currentUser = me;
+    const cuEl = document.getElementById('current-user');
+    if (cuEl) {
+      cuEl.innerHTML = `<span style="cursor:pointer" title="Odhlásiť sa" onclick="App.logout()">👤 ${esc(me.plne_meno || me.username)}</span>`;
+    }
+
     State.lookups = await API.get('/api/lookups');
-    const user = State.lookups.users?.[0];
-    if (user) document.getElementById('current-user').textContent = user.plne_meno || user.username || '';
 
     document.querySelectorAll('#sidebar nav a').forEach(a => {
       a.addEventListener('click', () => {
@@ -184,6 +187,12 @@ const App = {
     document.getElementById('detail-body').innerHTML = bodyHtml;
     document.getElementById('detail-edit-btn').onclick = editFn || (() => {});
     document.getElementById('detail-panel').classList.add('open');
+  },
+
+  async logout() {
+    if (!confirm('Odhlásiť sa?')) return;
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
   },
 };
 
@@ -2022,7 +2031,10 @@ Views.settings.render = async function() {
   const cont = document.getElementById('content');
   cont.innerHTML = '<div class="loading">Načítavam...</div>';
   const lk = State.lookups;
+  const usersHtml = await this.sectionUsers();
   cont.innerHTML = `
+    ${usersHtml}
+    ${this.sectionChangePassword()}
     ${this.section('Stavy projektov', lk.stavy_projektov||[], 'stavy', 'nazov')}
     ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
     ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
@@ -2108,6 +2120,78 @@ Views.settings.addJazyk = async function(btn) {
   this.render();
 };
 
+
+// ─── USER MANAGEMENT (Settings) ──────────────────────────────────────────────
+Views.settings.sectionUsers = async function() {
+  if (!State.currentUser?.is_admin) {
+    return `<div class="settings-section"><div class="settings-section-header"><h3>Môj účet</h3></div>
+      <div class="settings-section-body" style="padding:12px;font-size:13px;color:var(--text-muted)">
+        Prihlásený ako: <strong>${esc(State.currentUser?.plne_meno || State.currentUser?.username || '')}</strong>
+      </div></div>`;
+  }
+  const users = await API.get('/api/auth/users');
+  if (!users) return '';
+  const rows = users.map(u => `
+    <div class="settings-row" style="align-items:center;gap:8px">
+      <span style="min-width:120px;font-weight:500">${esc(u.username)}</span>
+      <span style="min-width:160px;color:var(--text-muted);font-size:12px">${esc(u.plne_meno||'')}</span>
+      <span class="tag ${u.is_admin?'tag-green':'tag-gray'}" style="font-size:11px">${u.is_admin?'Admin':'Používateľ'}</span>
+      <span class="tag ${u.active?'tag-green':'tag-red'}" style="font-size:11px">${u.active?'Aktívny':'Neaktívny'}</span>
+      <span style="font-size:11px;color:var(--text-muted)">${u.has_password?'✅ má heslo':'⚠️ bez hesla'}</span>
+      <div style="margin-left:auto;display:flex;gap:4px">
+        <button class="btn btn-sm btn-secondary" onclick="Views.settings.setUserPassword(${u.id},'${esc(u.username)}')">Nastaviť heslo</button>
+        <button class="btn btn-sm btn-secondary" onclick="Views.settings.toggleAdmin(${u.id})">Admin: ${u.is_admin?'Odobrať':'Pridať'}</button>
+        <button class="btn btn-sm ${u.active?'btn-danger':'btn-secondary'}" onclick="Views.settings.toggleActive(${u.id})">${u.active?'Deaktivovať':'Aktivovať'}</button>
+      </div>
+    </div>`).join('');
+  return `<div class="settings-section">
+    <div class="settings-section-header"><h3>Správa používateľov</h3></div>
+    <div class="settings-section-body">${rows || '<div style="padding:12px;color:var(--text-muted)">Žiadni používatelia</div>'}</div>
+  </div>`;
+};
+
+Views.settings.sectionChangePassword = function() {
+  return `<div class="settings-section">
+    <div class="settings-section-header"><h3>Zmena hesla</h3></div>
+    <div class="settings-section-body" style="padding:12px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="margin:0"><label style="font-size:12px">Staré heslo</label><input type="password" id="cp-old" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:160px"></div>
+        <div class="field" style="margin:0"><label style="font-size:12px">Nové heslo</label><input type="password" id="cp-new" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:160px"></div>
+        <div class="field" style="margin:0"><label style="font-size:12px">Zopakovať</label><input type="password" id="cp-new2" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:160px"></div>
+        <button class="btn btn-primary btn-sm" onclick="Views.settings.changePassword()">Zmeniť heslo</button>
+      </div>
+    </div>
+  </div>`;
+};
+
+Views.settings.setUserPassword = async function(uid, username) {
+  const pwd = prompt(`Nové heslo pre používateľa "${username}":`);
+  if (!pwd) return;
+  const r = await API.post(`/api/auth/users/${uid}/set-password`, { password: pwd });
+  if (r?.ok) { App.toast(`Heslo nastavené pre ${username}`, 'success'); Views.settings.render(); }
+  else App.toast(r?.detail || 'Chyba', 'error');
+};
+
+Views.settings.toggleAdmin = async function(uid) {
+  const r = await API.post(`/api/auth/users/${uid}/toggle-admin`, {});
+  if (r?.ok) { App.toast('Admin práva aktualizované', 'success'); Views.settings.render(); }
+};
+
+Views.settings.toggleActive = async function(uid) {
+  const r = await API.post(`/api/auth/users/${uid}/toggle-active`, {});
+  if (r?.ok) { App.toast('Stav používateľa aktualizovaný', 'success'); Views.settings.render(); }
+};
+
+Views.settings.changePassword = async function() {
+  const old = document.getElementById('cp-old')?.value || '';
+  const np = document.getElementById('cp-new')?.value || '';
+  const np2 = document.getElementById('cp-new2')?.value || '';
+  if (np !== np2) { App.toast('Heslá sa nezhodujú', 'error'); return; }
+  if (np.length < 4) { App.toast('Heslo musí mať aspoň 4 znaky', 'error'); return; }
+  const r = await API.post('/api/auth/change-password', { old_password: old, new_password: np });
+  if (r?.ok) { App.toast('Heslo zmenené', 'success'); document.getElementById('cp-old').value=''; document.getElementById('cp-new').value=''; document.getElementById('cp-new2').value=''; }
+  else App.toast(r?.detail || 'Chyba', 'error');
+};
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.App = App;

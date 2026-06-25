@@ -376,6 +376,9 @@ class User(Base):
     aktualny_projekt = Column(Integer)
     vynutit_stav = Column(Boolean, default=False)
     verzia_db = Column(String(255))
+    password_hash = Column(String(255))
+    is_admin = Column(Boolean, default=False)
+    active = Column(Boolean, default=True)
 
 
 class PodfilterProjektu(Base):
