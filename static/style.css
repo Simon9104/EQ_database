@@ -171,3 +171,36 @@ tr.paid:hover { background: #e8f5ec; }
 .tag-green { background: #c6f6d5; color: #276749; }
 .tag-orange { background: #feebc8; color: #c05621; }
 .tag-red { background: #fed7d7; color: #c53030; }
+
+/* Dashboard KPI cards */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.kpi-card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); padding: 18px 20px; }
+.kpi-value { font-size: 28px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.kpi-label { font-size: 12px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+.kpi-card.kpi-danger .kpi-value { color: var(--danger); }
+.kpi-card.kpi-success .kpi-value { color: var(--success); }
+.kpi-card.kpi-warning .kpi-value { color: var(--warning); }
+.dashboard-section { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); padding: 18px 20px; margin-bottom: 20px; }
+.dashboard-section h3 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 14px; }
+.stav-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.stav-row:last-child { border-bottom: none; }
+.stav-count { margin-left: auto; font-weight: 600; color: var(--text-muted); }
+
+/* Toast notifications */
+#toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast { padding: 12px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; box-shadow: 0 4px 16px rgba(0,0,0,0.15); animation: toast-in 0.25s ease; min-width: 220px; pointer-events: all; }
+.toast-success { background: #276749; color: #fff; }
+.toast-error { background: var(--danger); color: #fff; }
+.toast-info { background: #2b6cb0; color: #fff; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Firmy badges */
+.badge-odberatel { background: #ebf8ff; color: #2b6cb0; }
+.badge-dodavatel { background: #f0fff4; color: #276749; }
+.badge-agentura { background: #faf5ff; color: #6b46c1; }
+
+/* Naklady table in project detail */
+.naklady-total { padding: 8px 12px; font-size: 13px; font-weight: 600; text-align: right; background: #f8fafc; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+
+/* Keyboard shortcut hint */
+.kbd-hint { font-size: 11px; color: var(--text-muted); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: monospace; }

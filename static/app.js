@@ -61,9 +61,20 @@ function el(tag, attrs, ...children) {
   return e;
 }
 
+// ── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const c = document.getElementById('toast-container');
+  if (!c) return;
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 const State = {
-  view: 'projects',
+  view: 'dashboard',
   lookups: {},
   projects: { filters: {}, data: [] },
   items: { filters: {}, data: [] },
@@ -71,6 +82,7 @@ const State = {
   customers: { filters: {}, data: [] },
   credits: { filters: {}, data: [] },
   imposition: { filters: {}, data: [] },
+  firmy: { filters: {}, data: [] },
   editId: null,
   editType: null,
 };
@@ -89,20 +101,63 @@ const App = {
         this.navigate(a.dataset.view);
       });
     });
-    this.navigate('projects');
+
+    // Global search
+    const gs = document.getElementById('global-search');
+    if (gs) {
+      gs.addEventListener('input', e => {
+        const q = e.target.value.trim();
+        if (q.length > 1) this.globalSearch(q);
+      });
+      gs.addEventListener('keydown', e => { if (e.key === 'Escape') { gs.value = ''; gs.blur(); } });
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', e => {
+      const tag = document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === '/') { e.preventDefault(); gs?.focus(); }
+      if (e.key === 'n') App.openAdd();
+      if (e.key === 'Escape') { App.closeModal(); App.closeDetail(); }
+    });
+
+    this.navigate('dashboard');
   },
 
   navigate(view) {
     State.view = view;
     this.closeDetail();
     const titles = {
-      projects: 'Projekty', items: 'Položky', invoices: 'Faktúry',
-      customers: 'Zákazníci', credits: 'Bankové pohyby',
+      dashboard: 'Dashboard', projects: 'Projekty', items: 'Položky', invoices: 'Faktúry',
+      firmy: 'Firmy', customers: 'Zákazníci', credits: 'Bankové pohyby',
       imposition: 'Vyradovanie', settings: 'Nastavenia',
     };
     document.getElementById('topbar-title').textContent = titles[view] || view;
-    document.getElementById('add-btn').style.display = view === 'settings' ? 'none' : '';
+    const noAdd = ['dashboard', 'settings'];
+    document.getElementById('add-btn').style.display = noAdd.includes(view) ? 'none' : '';
+    const showExport = ['projects', 'invoices'].includes(view);
+    document.getElementById('export-btn').style.display = showExport ? '' : 'none';
+
+    document.querySelectorAll('#sidebar nav a').forEach(a => {
+      a.classList.toggle('active', a.dataset.view === view);
+    });
+
     Views[view]?.render();
+  },
+
+  exportCurrent() {
+    if (State.view === 'projects') window.open('/api/export/projects', '_blank');
+    else if (State.view === 'invoices') window.open('/api/export/invoices', '_blank');
+  },
+
+  async globalSearch(q) {
+    const [projs, invs] = await Promise.all([
+      API.get(`/api/projects?search=${encodeURIComponent(q)}&limit=5`),
+      API.get(`/api/invoices?search=${encodeURIComponent(q)}&limit=5`),
+    ]);
+    // Show results as quick suggestions below search bar (simple approach: navigate to view with filter)
+    if (projs.length) { this.navigate('projects'); State.projects.filters.search = q; Views.projects.render(); }
+    else if (invs.length) { this.navigate('invoices'); }
   },
 
   openAdd() { Views[State.view]?.openAdd?.(); },
@@ -134,6 +189,267 @@ const App = {
 
 // ── Views ────────────────────────────────────────────────────────────────────
 const Views = {};
+
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
+Views.dashboard = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = '<div class="loading">Načítavam...</div>';
+    let d;
+    try { d = await API.get('/api/dashboard'); } catch(e) { cont.innerHTML = '<div class="empty">Chyba načítania dashboardu</div>'; return; }
+
+    const stavMap = {};
+    (d.projekty_podla_stavu || []).forEach(r => { stavMap[r.stav] = r.pocet; });
+    const running = stavMap['Prebiehajúci'] || 0;
+    const toInvoice = stavMap['Fakturovať'] || 0;
+
+    cont.innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-value">${d.projekty_celkom ?? 0}</div>
+          <div class="kpi-label">Projektov celkom</div>
+        </div>
+        <div class="kpi-card kpi-warning">
+          <div class="kpi-value">${running}</div>
+          <div class="kpi-label">Prebiehajúce</div>
+        </div>
+        <div class="kpi-card kpi-success">
+          <div class="kpi-value">${toInvoice}</div>
+          <div class="kpi-label">Na fakturáciu</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value">${fmt_eur(d.faktury_zostava)}</div>
+          <div class="kpi-label">Nezaplatené faktúry</div>
+        </div>
+        <div class="kpi-card ${(d.faktury_po_splatnosti||0)>0?'kpi-danger':''}">
+          <div class="kpi-value">${d.faktury_po_splatnosti ?? 0}</div>
+          <div class="kpi-label">Po splatnosti</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value">${d.faktury_celkom ?? 0}</div>
+          <div class="kpi-label">Faktúr celkom</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="dashboard-section">
+          <h3>Projekty podľa stavu</h3>
+          ${(d.projekty_podla_stavu||[]).sort((a,b)=>b.pocet-a.pocet).map(r => `
+            <div class="stav-row">
+              <span>${statusBadge(r.stav)}</span>
+              <span class="stav-count">${r.pocet}</span>
+            </div>`).join('')}
+        </div>
+        <div class="dashboard-section">
+          <h3>Rýchle akcie</h3>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+            <button class="btn btn-secondary" onclick="App.navigate('projects')">📁 Všetky projekty</button>
+            <button class="btn btn-secondary" onclick="App.navigate('projects');State.projects.filters.stav='Prebiehajúci';Views.projects.render()">▶️ Prebiehajúce projekty</button>
+            <button class="btn btn-secondary" onclick="App.navigate('projects');State.projects.filters.stav='Fakturovať';Views.projects.render()">🧾 Na fakturáciu</button>
+            <button class="btn btn-secondary" onclick="App.navigate('invoices')">💰 Faktúry</button>
+            <button class="btn btn-primary" onclick="App.navigate('projects');Views.projects.openAdd()">+ Nový projekt</button>
+          </div>
+        </div>
+      </div>`;
+  },
+};
+
+// ─── FIRMY ───────────────────────────────────────────────────────────────────
+Views.firmy = {
+  async render() {
+    const cont = document.getElementById('content');
+    cont.innerHTML = `
+    <div class="filter-bar">
+      <input type="search" id="f-firmy-search" placeholder="Hľadať firmu, email, IČO..." value="${esc(State.firmy.filters.search||'')}">
+      <label class="checkbox-item"><input type="checkbox" id="f-firmy-odberatel" ${State.firmy.filters.odberatel?'checked':''}> Odberatelia</label>
+      <label class="checkbox-item"><input type="checkbox" id="f-firmy-dodavatel" ${State.firmy.filters.dodavatel?'checked':''}> Dodávatelia</label>
+      <button class="btn btn-secondary btn-sm" onclick="Views.firmy.clearFilters()">Zrušiť filtre</button>
+    </div>
+    <div id="firmy-table-wrap"><div class="loading">Načítavam...</div></div>`;
+    document.getElementById('f-firmy-search')?.addEventListener('input', e => { State.firmy.filters.search = e.target.value; this.load(); });
+    document.getElementById('f-firmy-odberatel')?.addEventListener('change', e => { State.firmy.filters.odberatel = e.target.checked || undefined; this.load(); });
+    document.getElementById('f-firmy-dodavatel')?.addEventListener('change', e => { State.firmy.filters.dodavatel = e.target.checked || undefined; this.load(); });
+    await this.load();
+  },
+
+  clearFilters() { State.firmy.filters = {}; this.render(); },
+
+  async load() {
+    const f = State.firmy.filters;
+    const params = new URLSearchParams({ limit: 300 });
+    if (f.search) params.set('search', f.search);
+    if (f.odberatel) params.set('odberatel', 'true');
+    if (f.dodavatel) params.set('dodavatel', 'true');
+    const data = await API.get('/api/firmy?' + params);
+    State.firmy.data = data;
+    this.renderTable(data);
+  },
+
+  renderTable(data) {
+    const wrap = document.getElementById('firmy-table-wrap');
+    if (!wrap) return;
+    if (!data.length) { wrap.innerHTML = '<div class="empty">Žiadne firmy</div>'; return; }
+    wrap.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Názov</th><th>IČO</th><th>IČ DPH</th><th>Telefón</th><th>Email</th><th>Mesto</th><th>Typ</th></tr></thead>
+      <tbody>${data.map(f => `<tr onclick="Views.firmy.openDetail(${f.id})">
+        <td class="mono">${f.id}</td>
+        <td class="td-truncate" style="max-width:200px"><strong>${esc(f.nazov||'')}</strong>${f.skratka?` <span class="tag">${esc(f.skratka)}</span>`:''}</td>
+        <td class="mono">${esc(f.ico||'')}</td>
+        <td class="mono">${esc(f.ic_dph||'')}</td>
+        <td>${esc(f.telefon||'')}</td>
+        <td>${f.email?`<a href="mailto:${esc(f.email)}" onclick="event.stopPropagation()">${esc(f.email)}</a>`:''}</td>
+        <td>${esc(f.mesto||'')}</td>
+        <td>${f.odberatel?'<span class="badge badge-odberatel">Odb.</span>':''} ${f.dodavatel?'<span class="badge badge-dodavatel">Dod.</span>':''} ${f.agentura?'<span class="badge badge-agentura">Ag.</span>':''}</td>
+      </tr>`).join('')}
+      </tbody></table>
+      <div class="pagination"><span>${data.length} firiem</span></div>
+    </div>`;
+  },
+
+  async openDetail(id) {
+    const f = await API.get('/api/firmy/' + id);
+    if (!f) return;
+    const kontakty = await API.get('/api/firmy/' + id + '/kontakty');
+    const kontHtml = kontakty.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Meno</th><th>Funkcia</th><th>Mobil</th><th>Email</th></tr></thead>
+      <tbody>${kontakty.map(k => `<tr>
+        <td>${esc((k.priezvisko||'')+' '+(k.meno||''))}</td>
+        <td>${esc(k.funkcia||'')}</td>
+        <td>${esc(k.mobil1||'')}</td>
+        <td>${k.email?`<a href="mailto:${esc(k.email)}">${esc(k.email)}</a>`:''}</td>
+      </tr>`).join('')}</tbody></table></div>` : '<div class="empty" style="padding:10px">Žiadne kontakty</div>';
+
+    const body = `
+      <div class="tabs">
+        <span class="tab active" onclick="switchTab(this,'fd-basic')">Základné</span>
+        <span class="tab" onclick="switchTab(this,'fd-fakturacia')">Fakturácia</span>
+        <span class="tab" onclick="switchTab(this,'fd-kontakty')">Kontakty (${kontakty.length})</span>
+      </div>
+      <div id="fd-basic">
+        <div class="detail-grid">
+          ${dfield('ID', f.id)} ${dfield('Skratka', f.skratka)}
+          ${dfield('Názov', f.nazov, 'full')}
+          ${dfield('Adresa', f.adresa, 'full')}
+          ${dfield('PSČ', f.psc)} ${dfield('Mesto', f.mesto)}
+          ${dfield('Štát', f.stat)} ${dfield('Webová stránka', f.webova_stranka)}
+          ${dfield('Telefón', f.telefon)} ${dfield('Email', f.email)}
+          ${dfield('Fax', f.fax)}
+        </div>
+        <div class="detail-section"><h4>Nastavenia</h4>
+          <div class="checkbox-row">
+            ${pflag('Odberateľ', f.odberatel)} ${pflag('Dodávateľ', f.dodavatel)}
+            ${pflag('Agentúra', f.agentura)} ${pflag('Platca DPH', f.platca_dph)}
+          </div>
+        </div>
+        ${f.poznamka ? `<div class="detail-section"><h4>Poznámka</h4><p style="font-size:13px">${esc(f.poznamka)}</p></div>` : ''}
+      </div>
+      <div id="fd-fakturacia" style="display:none">
+        <div class="detail-grid">
+          ${dfield('IČO', f.ico)} ${dfield('IČ DPH', f.ic_dph)}
+          ${dfield('DIČ', f.dic)} ${dfield('Číslo účtu', f.cislo_uctu)}
+        </div>
+      </div>
+      <div id="fd-kontakty" style="display:none">${kontHtml}
+        <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.firmy.openAddKontakt(${f.id})">+ Pridať kontakt</button>
+      </div>`;
+    App.openDetail(f.nazov || 'Firma', body, () => this.openEdit(f.id));
+  },
+
+  openAdd() { this.openForm(null); },
+  async openEdit(id) { const f = await API.get('/api/firmy/' + id); if (f) this.openForm(f); },
+
+  openForm(f) {
+    const v = k => esc(f?.[k] ?? '');
+    const chk = k => f?.[k] ? 'checked' : '';
+    const body = `
+    <div class="tabs">
+      <span class="tab active" onclick="switchTab(this,'ff-basic')">Základné</span>
+      <span class="tab" onclick="switchTab(this,'ff-fakturacia')">Fakturácia</span>
+      <span class="tab" onclick="switchTab(this,'ff-nastavenia')">Nastavenia</span>
+    </div>
+    <div id="ff-basic">
+      <div class="form-grid">
+        <div class="field form-full"><label>Názov firmy</label><input id="ff-nazov" value="${v('nazov')}"></div>
+        <div class="field"><label>Skratka</label><input id="ff-skratka" value="${v('skratka')}"></div>
+        <div class="field"><label>Webová stránka</label><input id="ff-webova_stranka" value="${v('webova_stranka')}"></div>
+        <div class="field form-full"><label>Adresa</label><input id="ff-adresa" value="${v('adresa')}"></div>
+        <div class="field"><label>PSČ</label><input id="ff-psc" value="${v('psc')}"></div>
+        <div class="field"><label>Mesto</label><input id="ff-mesto" value="${v('mesto')}"></div>
+        <div class="field"><label>Štát</label><input id="ff-stat" value="${v('stat')}"></div>
+        <div class="field"><label>Telefón</label><input id="ff-telefon" value="${v('telefon')}"></div>
+        <div class="field"><label>Email</label><input type="email" id="ff-email" value="${v('email')}"></div>
+        <div class="field"><label>Fax</label><input id="ff-fax" value="${v('fax')}"></div>
+        <div class="field form-full"><label>Poznámka</label><textarea id="ff-poznamka">${v('poznamka')}</textarea></div>
+      </div>
+    </div>
+    <div id="ff-fakturacia" style="display:none">
+      <div class="form-grid">
+        <div class="field"><label>IČO</label><input id="ff-ico" value="${v('ico')}"></div>
+        <div class="field"><label>IČ DPH</label><input id="ff-ic_dph" value="${v('ic_dph')}"></div>
+        <div class="field"><label>DIČ</label><input id="ff-dic" value="${v('dic')}"></div>
+        <div class="field form-full"><label>Číslo účtu / IBAN</label><input id="ff-cislo_uctu" value="${v('cislo_uctu')}"></div>
+      </div>
+    </div>
+    <div id="ff-nastavenia" style="display:none">
+      <div class="checkbox-row" style="flex-direction:column;align-items:flex-start;gap:10px">
+        ${cbox('ff-odberatel','Odberateľ',chk('odberatel'))}
+        ${cbox('ff-dodavatel','Dodávateľ',chk('dodavatel'))}
+        ${cbox('ff-agentura','Agentúra',chk('agentura'))}
+        ${cbox('ff-platca_dph','Platca DPH',chk('platca_dph'))}
+      </div>
+    </div>`;
+    App.openModal(f ? `Upraviť firmu: ${f.nazov}` : 'Nová firma', body, f?.id, !!f);
+  },
+
+  async save() {
+    const text = ['nazov','skratka','adresa','mesto','psc','stat','telefon','email','fax','webova_stranka','ico','ic_dph','dic','cislo_uctu','poznamka'];
+    const bools = ['odberatel','dodavatel','agentura','platca_dph'];
+    const data = {};
+    text.forEach(f => { const e = document.getElementById('ff-'+f); if (e) data[f] = e.value || null; });
+    bools.forEach(f => { data[f] = !!document.getElementById('ff-'+f)?.checked; });
+    try {
+      if (State.editId) await API.put('/api/firmy/' + State.editId, data);
+      else await API.post('/api/firmy', data);
+      showToast('Firma uložená', 'success');
+    } catch(e) { showToast('Chyba ukladania', 'error'); return; }
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  async delete() {
+    if (!confirm('Odstraniť firmu?')) return;
+    await API.del('/api/firmy/' + State.editId);
+    showToast('Firma odstránená', 'info');
+    App.closeModal();
+    App.closeDetail();
+    await this.load();
+  },
+
+  openAddKontakt(firmaId) {
+    const body = `<div class="form-grid">
+      <div class="field"><label>Priezvisko</label><input id="fk-priezvisko"></div>
+      <div class="field"><label>Meno</label><input id="fk-meno"></div>
+      <div class="field"><label>Funkcia</label><input id="fk-funkcia"></div>
+      <div class="field"><label>Oddelenie</label><input id="fk-oddelenie"></div>
+      <div class="field"><label>Telefón (práca)</label><input id="fk-telefon_praca"></div>
+      <div class="field"><label>Mobil 1</label><input id="fk-mobil1"></div>
+      <div class="field"><label>Mobil 2</label><input id="fk-mobil2"></div>
+      <div class="field"><label>Email</label><input type="email" id="fk-email"></div>
+      <div class="field form-full"><label>Poznámky</label><textarea id="fk-poznamky"></textarea></div>
+    </div>`;
+    App.openModal('Nový kontakt', body, null, false);
+    // Override save for kontakt
+    document.getElementById('modal-save-btn').onclick = async () => {
+      const fields = ['priezvisko','meno','funkcia','oddelenie','telefon_praca','mobil1','mobil2','email','poznamky'];
+      const data = { firma_id: firmaId };
+      fields.forEach(f => { data[f] = document.getElementById('fk-'+f)?.value || null; });
+      await API.post('/api/kontakty', data);
+      showToast('Kontakt pridaný', 'success');
+      App.closeModal();
+      this.openDetail(firmaId);
+    };
+  },
+};
 
 // ─── PROJECTS ────────────────────────────────────────────────────────────────
 Views.projects = {
@@ -237,6 +553,7 @@ Views.projects = {
       <div class="tabs">
         <span class="tab active" onclick="switchTab(this,'tab-basic')">Základné</span>
         <span class="tab" onclick="switchTab(this,'tab-items')">Položky (${items.length})</span>
+        <span class="tab" onclick="Views.projects.loadNaklady(${id},this)">Náklady</span>
         <span class="tab" onclick="switchTab(this,'tab-notes')">Poznámky</span>
         <span class="tab" onclick="switchTab(this,'tab-log')">Log</span>
       </div>
@@ -272,6 +589,7 @@ Views.projects = {
         ${items.length ? itemsTable(items) : '<div class="empty">Žiadne položky</div>'}
         <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.items.openAddForProject(${p.id})">+ Pridať položku</button>
       </div>
+      <div id="tab-naklady" style="display:none"><div class="loading">Načítavam...</div></div>
       <div id="tab-notes" style="display:none">
         ${dfield('Poznámky',p.poznamky,'full')}
         ${dfield('Poznámky ZL',p.poznamky_zl,'full')}
@@ -367,6 +685,67 @@ Views.projects = {
     if (p) document.getElementById('modal').classList.add('modal-lg');
   },
 
+  async loadNaklady(projectId, tabEl) {
+    switchTab(tabEl, 'tab-naklady');
+    const el = document.getElementById('tab-naklady');
+    if (!el) return;
+    const data = await API.get('/api/projects/' + projectId + '/naklady');
+    const total = data.reduce((s, n) => s + (n.vyroba || 0), 0);
+    el.innerHTML = data.length ? `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Popis</th><th>MJ</th><th>Počet</th><th>JC výroba</th><th>Výroba</th><th>Typ</th><th>Hotovo</th><th>Skont.</th></tr></thead>
+          <tbody>${data.map(n => `<tr>
+            <td class="mono">${n.id}</td>
+            <td class="td-truncate">${esc(n.popis||'')}</td>
+            <td>${esc(n.mj||'')}</td>
+            <td>${n.pocet??''}</td>
+            <td class="cur">${fmt_eur(n.jc_vyroba)}</td>
+            <td class="cur">${fmt_eur(n.vyroba)}</td>
+            <td>${esc(n.typ_nakladu||'')}</td>
+            <td>${n.hotovo?'✅':''}</td>
+            <td>${n.skontrolovane?'✓':''}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+        <div class="naklady-total">Spolu: <strong>${fmt_eur(total)}</strong></div>
+      </div>` : '<div class="empty">Žiadne náklady</div>';
+    el.insertAdjacentHTML('beforeend', `<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.projects.openAddNaklad(${projectId})">+ Pridať náklad</button>`);
+  },
+
+  openAddNaklad(projectId) {
+    const typy = State.lookups.typy_nakladov || [];
+    const typOpts = typy.map(t => `<option value="${esc(t.nazov)}">${esc(t.nazov)}</option>`).join('');
+    const body = `<div class="form-grid">
+      <div class="field form-full"><label>Popis</label><input id="fn-popis"></div>
+      <div class="field"><label>MJ</label><input id="fn-mj"></div>
+      <div class="field"><label>Počet</label><input type="number" step="0.001" id="fn-pocet" oninput="calcNakladCena()"></div>
+      <div class="field"><label>JC výroba</label><input type="number" step="0.01" id="fn-jc_vyroba" oninput="calcNakladCena()"></div>
+      <div class="field"><label>Výroba (spolu)</label><input type="number" step="0.01" id="fn-vyroba" readonly style="background:#f8fafc"></div>
+      <div class="field"><label>Typ nákladu</label><select id="fn-typ_nakladu"><option value="">—</option>${typOpts}</select></div>
+      <div class="field"><label>Objednávka</label><input id="fn-objednavka"></div>
+      <div class="field"><label>Kde je</label><input id="fn-kde_je"></div>
+      <div class="field form-full"><label>Poznámka</label><textarea id="fn-poznamka"></textarea></div>
+    </div>
+    <div class="checkbox-row" style="margin-top:8px">
+      ${cbox('fn-hotovo','Hotovo','')}
+      ${cbox('fn-skontrolovane','Skontrolované','')}
+    </div>`;
+    App.openModal('Nový náklad', body, null, false);
+    document.getElementById('modal-save-btn').onclick = async () => {
+      const text = ['popis','mj','objednavka','kde_je','poznamka','typ_nakladu'];
+      const nums = ['pocet','jc_vyroba','vyroba'];
+      const bools = ['hotovo','skontrolovane'];
+      const data = { id_projektu: projectId };
+      text.forEach(f => { data[f] = document.getElementById('fn-'+f)?.value || null; });
+      nums.forEach(f => { const e = document.getElementById('fn-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value)||0 : 0; });
+      bools.forEach(f => { data[f] = !!document.getElementById('fn-'+f)?.checked; });
+      await API.post('/api/projects/' + projectId + '/naklady', data);
+      showToast('Náklad pridaný', 'success');
+      App.closeModal();
+      this.loadNaklady(projectId, document.querySelector('.tab.active'));
+    };
+  },
+
   async save() {
     const fields = ['nazov_projektu','nazov_firmy','priezvisko_meno','manazer','stav','kategoria','priorita',
       'cislo_objednavky','cislo_cp','strucna_specifikacia','folder_zakazky','folder_cp','zucastneni',
@@ -389,6 +768,7 @@ Views.projects = {
 
     if (State.editId) await API.put('/api/projects/' + State.editId, data);
     else await API.post('/api/projects', data);
+    showToast('Projekt uložený', 'success');
     App.closeModal();
     App.closeDetail();
     await this.load();
@@ -397,6 +777,7 @@ Views.projects = {
   async delete() {
     if (!confirm('Odstraniť projekt?')) return;
     await API.del('/api/projects/' + State.editId);
+    showToast('Projekt odstránený', 'info');
     App.closeModal();
     App.closeDetail();
     await this.load();
@@ -701,6 +1082,7 @@ Views.invoices = {
     dates.forEach(f => { data[f] = document.getElementById('fv-'+f)?.value || null; });
     if (State.editId) await API.put('/api/invoices/' + State.editId, data);
     else await API.post('/api/invoices', data);
+    showToast('Faktúra uložená', 'success');
     App.closeModal();
     App.closeDetail();
     await this.load();
@@ -709,6 +1091,7 @@ Views.invoices = {
   async delete() {
     if (!confirm('Odstraniť faktúru?')) return;
     await API.del('/api/invoices/' + State.editId);
+    showToast('Faktúra odstránená', 'info');
     App.closeModal();
     App.closeDetail();
     await this.load();
@@ -1024,9 +1407,11 @@ Views.settings = {
       ${this.section('Status položky', lk.status_polozky||[], 'status-polozky', 'nazov')}
       ${this.section('Typy zákaziek', lk.typy_zakaziek||[], 'typy-zakaziek', 'nazov')}
       ${this.section('Typy odmien', lk.typy_odmeny||[], 'typy-odmeny', 'nazov')}
+      ${this.section('Typy nákladov', lk.typy_nakladov||[], 'typy-nakladov', 'nazov')}
       ${this.section('Podfiltre projektov', lk.podfilter_projektov||[], 'podfilter', 'nazov')}
       ${this.sectionVazby(lk.vazby||[])}
       ${this.sectionDPH(lk.sadzby_dph||[])}
+      ${this.sectionObalkaCeny(lk.obalka_ceny||[])}
     `;
     this.bindEvents();
   },
@@ -1075,6 +1460,41 @@ Views.settings = {
       <div class="settings-section-header"><h3>Sadzby DPH</h3></div>
       <div class="settings-section-body" id="sb-sadzby-dph">${rowsHtml}</div>
     </div>`;
+  },
+
+  sectionObalkaCeny(rows) {
+    const rowsHtml = rows.map(r => `
+      <div class="settings-row" data-id="${r.id}" data-endpoint="obalka-ceny">
+        <input placeholder="Farebnosť" value="${esc(r.farebnost||'')}" style="width:100px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fob-farebnost">
+        <input type="number" step="0.0001" placeholder="JCV" value="${r.jcv??''}" style="width:120px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fob-jcv">
+        <span style="font-size:12px;color:var(--text-muted)">(${((r.jcv||0)).toFixed(4)})</span>
+        <button class="btn-icon" onclick="Views.settings.saveObalkaCena(this)">💾</button>
+        <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
+      </div>`).join('');
+    return `<div class="settings-section">
+      <div class="settings-section-header"><h3>Ceny obálky (JCV)</h3>
+        <button class="btn btn-sm btn-primary" onclick="Views.settings.addObalkaCena(this)">+ Pridať</button>
+      </div>
+      <div class="settings-section-body" id="sb-obalka-ceny">${rowsHtml}</div>
+    </div>`;
+  },
+
+  async saveObalkaCena(btn) {
+    const row = btn.closest('.settings-row');
+    const id = row.dataset.id;
+    const farebnost = row.querySelector('.fob-farebnost').value;
+    const jcv = parseFloat(row.querySelector('.fob-jcv').value) || 0;
+    await API.put(`/api/obalka-ceny/${id}`, { farebnost, jcv });
+    await this.refreshLookups();
+  },
+
+  async addObalkaCena(btn) {
+    const farebnost = prompt('Farebnosť (napr. 4+0):');
+    if (!farebnost) return;
+    const jcv = parseFloat(prompt('JCV (napr. 0.034):')) || 0;
+    await API.post('/api/obalka-ceny', { farebnost, jcv });
+    await this.refreshLookups();
+    this.render();
   },
 
   bindEvents() {},
@@ -1190,6 +1610,12 @@ function fmtBankDate(v) {
   if (s.length === 8) return `${s.slice(6,8)}.${s.slice(4,6)}.${s.slice(0,4)}`;
   return s;
 }
+function calcNakladCena() {
+  const pocet = parseFloat(document.getElementById('fn-pocet')?.value) || 0;
+  const jc = parseFloat(document.getElementById('fn-jc_vyroba')?.value) || 0;
+  const vyroba = document.getElementById('fn-vyroba');
+  if (vyroba) vyroba.value = (pocet * jc).toFixed(4);
+}
 function calcItemPrice() {
   const pocet = parseFloat(document.getElementById('fi-pocet')?.value) || 0;
   const jc = parseFloat(document.getElementById('fi-jc')?.value) || 0;
@@ -1207,9 +1633,11 @@ function switchTab(el, targetId) {
   if (!container) return;
   container.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  const tabIds = ['tab-basic','tab-items','tab-notes','tab-log',
+  const tabIds = ['tab-basic','tab-items','tab-naklady','tab-notes','tab-log',
                    'pf-basic','pf-finance','pf-flags','pf-notes',
-                   'if-basic','if-tlac','if-expedia'];
+                   'if-basic','if-tlac','if-expedia',
+                   'fd-basic','fd-fakturacia','fd-kontakty',
+                   'ff-basic','ff-fakturacia','ff-nastavenia'];
   tabIds.forEach(id => {
     const el2 = document.getElementById(id);
     if (el2) el2.style.display = 'none';
@@ -1223,4 +1651,7 @@ window.App = App;
 window.Views = Views;
 window.switchTab = switchTab;
 window.calcItemPrice = calcItemPrice;
+window.calcNakladCena = calcNakladCena;
+window.showToast = showToast;
+window.State = State;
 document.addEventListener('DOMContentLoaded', () => App.init());
