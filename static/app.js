@@ -90,6 +90,7 @@ const State = {
 
 // ── App ──────────────────────────────────────────────────────────────────────
 const App = {
+  toast: showToast,
   async init() {
     // Load current user from auth
     const me = await API.get('/api/auth/me');
