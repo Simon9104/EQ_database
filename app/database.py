@@ -32,6 +32,14 @@ async def init_db():
             # Imposition links
             "ALTER TABLE vyradovanie ADD COLUMN id_projektu INTEGER",
             "ALTER TABLE vyradovanie ADD COLUMN id_polozky INTEGER",
+            # Firemne udaje table (failsafe if create_all missed it)
+            """CREATE TABLE IF NOT EXISTS firemne_udaje (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                nazov TEXT, adresa TEXT, mesto TEXT, psc TEXT,
+                ico TEXT, ic_dph TEXT, dic TEXT,
+                iban TEXT, swift TEXT, banka TEXT,
+                telefon TEXT, email TEXT, web TEXT, poznamka_fa TEXT
+            )""",
         ]
         for sql in migrations:
             try:
