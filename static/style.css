@@ -220,3 +220,7 @@ tr.paid:hover { background: #e8f5ec; }
 
 /* Multi-user awareness */
 .multi-user-badge { background: #fffbeb; border: 1px solid #f6e05e; color: #744210; border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; }
+
+/* Quick items table */
+.items-quick-table tbody tr:hover { background: #f0f7ff; }
+.item-status-select { border: 1px solid var(--border); border-radius: 5px; padding: 2px 4px; font-size: 12px; background: var(--surface); cursor: pointer; max-width: 130px; }
