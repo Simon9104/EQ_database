@@ -217,3 +217,6 @@ tr.paid:hover { background: #e8f5ec; }
 .alert-error { background: #fff5f5; border: 1px solid #fed7d7; color: #c53030; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
 .tag-gray { background: #e2e8f0; color: #4a5568; }
+
+/* Multi-user awareness */
+.multi-user-badge { background: #fffbeb; border: 1px solid #f6e05e; color: #744210; border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; }
