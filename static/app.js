@@ -102,6 +102,13 @@ const App = {
     }
 
     State.lookups = await API.get('/api/lookups');
+    // Load extra lookups in background (non-blocking)
+    API.get('/api/projects?limit=2000&skip=0').then(pl => {
+      State.lookups.projekty_select = (pl || []).map(p => ({ id: p.id, nazov_projektu: p.nazov_projektu }));
+    }).catch(() => {});
+    API.get('/api/firmy?limit=2000').then(fl => {
+      State.lookups.firmy = fl || [];
+    }).catch(() => {});
 
     document.querySelectorAll('#sidebar nav a').forEach(a => {
       a.addEventListener('click', () => {
@@ -578,6 +585,7 @@ Views.projects = {
         <span class="tab ${items.length ? '' : 'active'}" onclick="switchTab(this,'tab-basic')">Základné</span>
         <span class="tab ${items.length ? 'active' : ''}" onclick="switchTab(this,'tab-items')">Položky (${items.length})</span>
         <span class="tab" onclick="Views.projects.loadNaklady(${id},this)">Náklady</span>
+        <span class="tab" onclick="Views.projects.loadFaktury(${id},this)">Faktúry</span>
         <span class="tab" onclick="switchTab(this,'tab-notes')">Poznámky</span>
         <span class="tab" onclick="switchTab(this,'tab-log')">Log</span>
       </div>
@@ -614,6 +622,7 @@ Views.projects = {
         <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.items.openAddForProject(${p.id})">+ Pridať položku</button>
       </div>
       <div id="tab-naklady" style="display:none"><div class="loading">Načítavam...</div></div>
+      <div id="tab-faktury" style="display:none"><div class="loading">Načítavam...</div></div>
       <div id="tab-notes" style="display:none">
         ${dfield('Poznámky',p.poznamky,'full')}
         ${dfield('Poznámky ZL',p.poznamky_zl,'full')}
@@ -744,6 +753,37 @@ Views.projects = {
         <div class="naklady-total">Spolu: <strong>${fmt_eur(total)}</strong></div>
       </div>` : '<div class="empty">Žiadne náklady</div>';
     el.insertAdjacentHTML('beforeend', `<button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="Views.projects.openAddNaklad(${projectId})">+ Pridať náklad</button>`);
+  },
+
+  async loadFaktury(projectId, tabEl) {
+    switchTab(tabEl, 'tab-faktury');
+    const el = document.getElementById('tab-faktury');
+    if (!el) return;
+    el.innerHTML = '<div class="loading">Načítavam...</div>';
+    // Look up invoices linked by id_projektu, or linked via polozky.cislo_faktury
+    const data = await API.get('/api/invoices?id_projektu=' + projectId + '&limit=100');
+    const total = data.reduce((s, f) => s + (f.suma_s_dph || 0), 0);
+    const zostava = data.reduce((s, f) => s + (f.zostava_uhradit || 0), 0);
+    el.innerHTML = data.length ? `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Č. FA</th><th>Dátum</th><th>Odberateľ</th><th>Suma s DPH</th><th>Zostáva</th><th>Splatnosť</th><th>Uhradená</th></tr></thead>
+        <tbody>${data.map(f => {
+          const overdue = (f.dni_po_splatnosti||0) > 0 && (f.zostava_uhradit||0) > 0;
+          const paid = (f.zostava_uhradit||0) <= 0;
+          return `<tr class="${overdue?'overdue':paid?'paid':''}" onclick="Views.invoices.openDetail(${f.id})" style="cursor:pointer">
+            <td class="mono">${esc(f.cislo_faktury||'')}</td>
+            <td>${fmt_date(f.datum_vystavenia)}</td>
+            <td class="td-truncate">${esc(f.odberatel||'')}</td>
+            <td class="cur">${fmt_eur(f.suma_s_dph)}</td>
+            <td class="cur ${overdue?'cur-neg':paid?'cur-pos':''}">${fmt_eur(f.zostava_uhradit)}</td>
+            <td>${fmt_date(f.datum_splatnosti)}</td>
+            <td>${paid?'✅':''}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+      <div class="pagination"><span>${data.length} faktúr | Celkom: <strong>${fmt_eur(total)}</strong> | Zostáva: <strong>${fmt_eur(zostava)}</strong></span></div>
+      </div>` : '<div class="empty">Žiadne faktúry prepojené s projektom</div>';
+    el.insertAdjacentHTML('beforeend', `<p style="font-size:12px;color:var(--text-muted);margin-top:8px">Prepojenie faktúr s projektom nastavíte pri úprave faktúry.</p>`);
   },
 
   openAddNaklad(projectId) {
@@ -1079,18 +1119,47 @@ Views.invoices = {
   },
 
   async openDetail(id) {
-    const f = State.invoices.data.find(i => i.id === id) || {};
+    const f = State.invoices.data.find(i => i.id === id) || await API.get('/api/invoices/' + id);
     const overdue = (f.dni_po_splatnosti||0) > 0 && (f.zostava_uhradit||0) > 0;
+    // Load linked items and project in parallel
+    const [polozky, projektData] = await Promise.all([
+      API.get(`/api/invoices/${id}/polozky`).catch(() => []),
+      f.id_projektu ? API.get('/api/projects/' + f.id_projektu).catch(() => null) : Promise.resolve(null),
+    ]);
+    const projektLink = projektData
+      ? `<a href="#" onclick="App.closeDetail();Views.projects.openDetail(${projektData.id});return false" style="color:var(--primary)">#${projektData.id} – ${esc(projektData.nazov_projektu||'')}</a>`
+      : (f.id_projektu ? `#${f.id_projektu}` : '—');
+    const firmaName = (() => { const fi = (State.lookups.firmy||[]).find(x=>x.id===f.firma_id); return fi ? esc(fi.nazov||'') : '—'; })();
+    const polozkyHtml = polozky.length ? `
+      <div class="detail-section"><h4>Položky (${polozky.length})</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Popis</th><th>MJ</th><th>Počet</th><th>JC</th><th>Cena bez DPH</th><th>DPH%</th><th>Cena s DPH</th></tr></thead>
+        <tbody>${polozky.map((it,i)=>`<tr>
+          <td>${i+1}</td><td>${esc(it.popis||'')}</td><td>${esc(it.mj||'')}</td>
+          <td class="cur">${it.pocet??''}</td><td class="cur">${fmt_eur(it.jc)}</td>
+          <td class="cur">${fmt_eur(it.cena)}</td>
+          <td class="cur">${it.sadzba_dph!=null?(it.sadzba_dph<2?(it.sadzba_dph*100).toFixed(0):it.sadzba_dph)+'%':''}</td>
+          <td class="cur">${fmt_eur(it.cena_s_dph)}</td>
+        </tr>`).join('')}
+        </tbody></table></div></div>` : '';
     const body = `
       <div class="detail-grid">
-        ${dfield('Č. faktúry',f.cislo_faktury)} ${dfield('Dátum vystavenia',fmt_date(f.datum_vystavenia))}
+        ${dfield('Č. faktúry',f.cislo_faktury)} ${dfield('Variabilný symbol',f.vs||f.cislo_faktury||'—')}
+        ${dfield('Dátum vystavenia',fmt_date(f.datum_vystavenia))} ${dfield('Dátum splatnosti',fmt_date(f.datum_splatnosti))}
         ${dfield('Odberateľ',f.odberatel,'full')}
+        ${dfield('Firma (z DB)',firmaName)} ${dfield('Projekt',projektLink)}
         ${dfield('Popis',f.popis,'full')}
+        ${dfield('Forma úhrady',f.forma_uhrady||'—')} ${dfield('IBAN',f.iban||'—')}
         ${dfield('Suma bez DPH',fmt_eur(f.suma_bez_dph))} ${dfield('Suma s DPH',fmt_eur(f.suma_s_dph))}
-        ${dfield('Suma k úhrade',fmt_eur(f.suma_k_uhrade))} ${dfield('Dátum splatnosti',fmt_date(f.datum_splatnosti))}
+        ${dfield('Suma k úhrade',fmt_eur(f.suma_k_uhrade))}
         ${dfield('Zostáva uhradiť',`<span class="${overdue?'cur-neg':'cur-pos'}">${fmt_eur(f.zostava_uhradit)}</span>`)}
         ${dfield('Dní po splatnosti', overdue?`<span style="color:var(--danger);font-weight:600">${f.dni_po_splatnosti}</span>`:f.dni_po_splatnosti??'—')}
         ${dfield('Dátum úhrady',fmt_date(f.datum_uhrady))}
+        ${f.poznamka ? dfield('Poznámka',f.poznamka,'full') : ''}
+      </div>
+      ${polozkyHtml}
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <a href="/api/invoices/${id}/pdf" target="_blank" class="btn btn-primary btn-sm">📄 Stiahnuť PDF faktúru</a>
       </div>`;
     App.openDetail(`Faktúra ${f.cislo_faktury}`, body, () => this.openEdit(id));
   },
@@ -1100,30 +1169,45 @@ Views.invoices = {
 
   openForm(f) {
     const v = k => esc(f?.[k] ?? '');
+    const projekty = State.lookups.projekty_select || [];
+    const firmy = State.lookups.firmy || [];
+    const projektOpts = `<option value="">— bez projektu —</option>` +
+      projekty.map(p => `<option value="${p.id}" ${f?.id_projektu===p.id?'selected':''}>#${p.id} ${esc(p.nazov_projektu||'')}</option>`).join('');
+    const firmaOpts = `<option value="">— bez firmy —</option>` +
+      firmy.map(fi => `<option value="${fi.id}" ${f?.firma_id===fi.id?'selected':''}>${esc(fi.nazov||'')}</option>`).join('');
     const body = `<div class="form-grid">
       <div class="field"><label>Č. faktúry</label><input id="fv-cislo_faktury" value="${v('cislo_faktury')}"></div>
+      <div class="field"><label>Variabilný symbol</label><input id="fv-vs" value="${v('vs')}"></div>
       <div class="field"><label>Dátum vystavenia</label><input type="date" id="fv-datum_vystavenia" value="${isoDate(f?.datum_vystavenia)}"></div>
-      <div class="field form-full"><label>Odberateľ</label><input id="fv-odberatel" value="${v('odberatel')}"></div>
+      <div class="field"><label>Dátum splatnosti</label><input type="date" id="fv-datum_splatnosti" value="${isoDate(f?.datum_splatnosti)}"></div>
+      <div class="field form-full"><label>Odberateľ (názov)</label><input id="fv-odberatel" value="${v('odberatel')}"></div>
+      <div class="field"><label>Firma (z DB)</label><select id="fv-firma_id">${firmaOpts}</select></div>
+      <div class="field"><label>Projekt</label><select id="fv-id_projektu">${projektOpts}</select></div>
       <div class="field form-full"><label>Popis</label><input id="fv-popis" value="${v('popis')}"></div>
       <div class="field"><label>Suma bez DPH</label><input type="number" step="0.01" id="fv-suma_bez_dph" value="${f?.suma_bez_dph??''}"></div>
       <div class="field"><label>Suma s DPH</label><input type="number" step="0.01" id="fv-suma_s_dph" value="${f?.suma_s_dph??''}"></div>
       <div class="field"><label>Suma k úhrade</label><input type="number" step="0.01" id="fv-suma_k_uhrade" value="${f?.suma_k_uhrade??''}"></div>
-      <div class="field"><label>Dátum splatnosti</label><input type="date" id="fv-datum_splatnosti" value="${isoDate(f?.datum_splatnosti)}"></div>
       <div class="field"><label>Zostáva uhradiť</label><input type="number" step="0.01" id="fv-zostava_uhradit" value="${f?.zostava_uhradit??''}"></div>
       <div class="field"><label>Dní po splatnosti</label><input type="number" id="fv-dni_po_splatnosti" value="${f?.dni_po_splatnosti??''}"></div>
       <div class="field"><label>Dátum úhrady</label><input type="date" id="fv-datum_uhrady" value="${isoDate(f?.datum_uhrady)}"></div>
+      <div class="field"><label>Forma úhrady</label><input id="fv-forma_uhrady" value="${v('forma_uhrady')}" placeholder="bankový prevod"></div>
+      <div class="field"><label>IBAN</label><input id="fv-iban" value="${v('iban')}"></div>
+      <div class="field"><label>SWIFT/BIC</label><input id="fv-swift" value="${v('swift')}"></div>
+      <div class="field form-full"><label>Poznámka na faktúre</label><textarea id="fv-poznamka" rows="2" style="width:100%">${v('poznamka')}</textarea></div>
     </div>`;
     App.openModal(f ? `Upraviť faktúru ${f.cislo_faktury}` : 'Nová faktúra', body, f?.id, !!f);
   },
 
   async save() {
-    const text = ['cislo_faktury','odberatel','popis'];
+    const text = ['cislo_faktury','odberatel','popis','vs','forma_uhrady','iban','swift','poznamka'];
     const nums = ['suma_bez_dph','suma_s_dph','suma_k_uhrade','zostava_uhradit','dni_po_splatnosti'];
     const dates = ['datum_vystavenia','datum_splatnosti','datum_uhrady'];
     const data = {};
     text.forEach(f => { data[f] = document.getElementById('fv-'+f)?.value || null; });
     nums.forEach(f => { const e = document.getElementById('fv-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value) : null; });
     dates.forEach(f => { data[f] = document.getElementById('fv-'+f)?.value || null; });
+    const fid = document.getElementById('fv-firma_id')?.value; data.firma_id = fid ? parseInt(fid) : null;
+    const pid = document.getElementById('fv-id_projektu')?.value; data.id_projektu = pid ? parseInt(pid) : null;
     if (State.editId) await API.put('/api/invoices/' + State.editId, data);
     else await API.post('/api/invoices', data);
     showToast('Faktúra uložená', 'success');
@@ -1555,11 +1639,16 @@ Views.imposition = {
 
   openDetail(id) {
     const d = State.imposition.data.find(x => x.id === id) || {};
+    // Resolve project link
+    const projektLink = d.id_projektu
+      ? `<a href="#" onclick="App.closeDetail();Views.projects.openDetail(${d.id_projektu});return false" style="color:var(--primary)">#${d.id_projektu}</a>`
+      : '—';
     const body = `
       <div class="detail-grid">
         ${dfield('ID',d.id)} ${dfield('Formát',d.format)}
         ${dfield('Typ väzby',d.vazba_typ)} ${dfield('Náklad',d.naklad)}
         ${dfield('Strán',d.stran)} ${dfield('Typ vyradenia',d.typ_vyradenia)}
+        ${dfield('Projekt',projektLink)}
       </div>
       <div class="detail-section"><h4>Ceny</h4><div class="detail-grid">
         ${dfield('JPH',fmt_eur(d.vn_jph))} ${dfield('CPH',fmt_eur(d.vn_cph))}
@@ -1601,6 +1690,10 @@ Views.imposition = {
       <div class="field form-full"><label>ČB strany v dokumente (napr. 2-252)</label><input id="fd-cb_strany_v_dokumente" value="${v('cb_strany_v_dokumente')}"></div>
       <div class="field form-full"><label>Na FAR (vkladačky)</label><textarea id="fd-na_far" rows="3" style="width:100%;font-family:monospace;font-size:12px">${v('na_far')}</textarea></div>
       <div class="field form-full"><label>Retazec špecifikácie</label><input id="fd-retazec_specifikacie" value="${v('retazec_specifikacie')}"></div>
+      <div class="field"><label>Projekt (ID)</label><select id="fd-id_projektu">
+        <option value="">— bez projektu —</option>
+        ${(State.lookups.projekty_select||[]).map(p=>`<option value="${p.id}" ${d?.id_projektu===p.id?'selected':''}>#${p.id} ${esc(p.nazov_projektu||'')}</option>`).join('')}
+      </select></div>
     </div>`;
     App.openModal(d ? `Upraviť vyradovanie #${d.id}` : 'Nový záznam vyradovania', body, d?.id, !!d);
   },
@@ -1611,6 +1704,7 @@ Views.imposition = {
     const data = {};
     text.forEach(f => { data[f] = document.getElementById('fd-'+f)?.value || null; });
     nums.forEach(f => { const e = document.getElementById('fd-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value) : null; });
+    const pid = document.getElementById('fd-id_projektu')?.value; data.id_projektu = pid ? parseInt(pid) : null;
     if (State.editId) await API.put('/api/imposition/' + State.editId, data);
     else await API.post('/api/imposition', data);
     App.closeModal();
@@ -1691,6 +1785,7 @@ Views.settings = {
     cont.innerHTML = '<div class="loading">Načítavam...</div>';
     const lk = State.lookups;
     const usersHtml = await this.sectionUsers();
+    const firemneHtml = tab === 'firma' ? await this.sectionFiremneUdaje() : '';
     const tab = this._tab;
     const tabBtn = (id, label) =>
       `<button class="tab-btn${tab===id?' active':''}" onclick="Views.settings._switchTab('${id}')">${label}</button>`;
@@ -1701,6 +1796,7 @@ Views.settings = {
         ${tabBtn('financie','💶 Financie')}
         ${tabBtn('iqk','📚 IQK')}
         ${tabBtn('pouzivatelia','👤 Používatelia')}
+        ${tabBtn('firma','🏢 Firma')}
       </div>
       <div id="settings-tab-content" style="padding:0">
         ${tab==='projekty' ? `
@@ -1726,6 +1822,7 @@ Views.settings = {
           ${usersHtml}
           ${this.sectionChangePassword()}
         ` : ''}
+        ${tab==='firma' ? firemneHtml : ''}
       </div>`;
     this.bindEvents();
   },
@@ -2322,6 +2419,49 @@ Views.settings.sectionChangePassword = function() {
       </div>
     </div>
   </div>`;
+};
+
+Views.settings.sectionFiremneUdaje = async function() {
+  let ud = {};
+  try { ud = await API.get('/api/firemne-udaje') || {}; } catch(e) {}
+  const f = (id, label, val, type='text', placeholder='') =>
+    `<div class="field"><label>${label}</label><input type="${type}" id="fu-${id}" value="${esc(val||'')}" placeholder="${placeholder}" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px"></div>`;
+  return `<div class="settings-section">
+    <div class="settings-section-header"><h3>Firemné údaje (dodávateľ na faktúrach)</h3></div>
+    <div class="settings-section-body" style="padding:12px">
+      <div class="form-grid">
+        ${f('nazov','Názov firmy',ud.nazov,'text','napr. ABC tlačiareň s.r.o.')}
+        ${f('adresa','Adresa',ud.adresa,'text','Ulica 1')}
+        ${f('mesto','Mesto',ud.mesto,'text','Bratislava')}
+        ${f('psc','PSČ',ud.psc,'text','81101')}
+        ${f('ico','IČO',ud.ico)}
+        ${f('dic','DIČ',ud.dic)}
+        ${f('ic_dph','IČ DPH',ud.ic_dph)}
+        ${f('iban','IBAN',ud.iban,'text','SK12 3456...')}
+        ${f('swift','SWIFT/BIC',ud.swift,'text','GIBASKBX')}
+        ${f('banka','Banka',ud.banka,'text','VÚB a.s.')}
+        ${f('telefon','Telefón',ud.telefon)}
+        ${f('email','E-mail',ud.email,'email')}
+        ${f('web','Web',ud.web,'text','www.firma.sk')}
+        <div class="field form-full"><label>Poznámka pod faktúrou</label><textarea id="fu-poznamka_fa" rows="3" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">${esc(ud.poznamka_fa||'')}</textarea></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onclick="Views.settings.saveFiremneUdaje()">💾 Uložiť firemné údaje</button>
+        <span style="font-size:12px;color:var(--text-muted)">Logo: uložte súbor <code>static/logo.png</code> na server — automaticky sa zobrazí na PDF faktúrach.</span>
+      </div>
+    </div>
+  </div>`;
+};
+
+Views.settings.saveFiremneUdaje = async function() {
+  const fields = ['nazov','adresa','mesto','psc','ico','dic','ic_dph','iban','swift','banka','telefon','email','web'];
+  const data = {};
+  fields.forEach(k => { data[k] = document.getElementById('fu-'+k)?.value.trim() || null; });
+  data.poznamka_fa = document.getElementById('fu-poznamka_fa')?.value.trim() || null;
+  try {
+    await API.put('/api/firemne-udaje', data);
+    App.toast('Firemné údaje uložené', 'success');
+  } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
 };
 
 Views.settings.toggleAdmin = async function(uid) {

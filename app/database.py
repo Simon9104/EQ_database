@@ -21,6 +21,17 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN password_hash TEXT",
             "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1",
+            # Invoice extensions
+            "ALTER TABLE faktury ADD COLUMN id_projektu INTEGER",
+            "ALTER TABLE faktury ADD COLUMN firma_id INTEGER",
+            "ALTER TABLE faktury ADD COLUMN vs TEXT",
+            "ALTER TABLE faktury ADD COLUMN forma_uhrady TEXT",
+            "ALTER TABLE faktury ADD COLUMN iban TEXT",
+            "ALTER TABLE faktury ADD COLUMN swift TEXT",
+            "ALTER TABLE faktury ADD COLUMN poznamka TEXT",
+            # Imposition links
+            "ALTER TABLE vyradovanie ADD COLUMN id_projektu INTEGER",
+            "ALTER TABLE vyradovanie ADD COLUMN id_polozky INTEGER",
         ]
         for sql in migrations:
             try:
