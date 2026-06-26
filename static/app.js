@@ -109,6 +109,9 @@ const App = {
     API.get('/api/firmy?limit=2000').then(fl => {
       State.lookups.firmy = fl || [];
     }).catch(() => {});
+    API.get('/api/firemne-udaje').then(ud => {
+      State.firemneUdaje = ud || {};
+    }).catch(() => {});
 
     document.querySelectorAll('#sidebar nav a').forEach(a => {
       a.addEventListener('click', () => {
@@ -956,9 +959,12 @@ Views.items = {
   openForm(item, projectId) {
     const statOpts = (State.lookups.status_polozky||[]).map(s => `<option value="${esc(s.nazov)}" ${item?.status===s.nazov?'selected':''}>${esc(s.nazov)}</option>`).join('');
     const typOpts = (State.lookups.typy_zakaziek||[]).map(s => `<option value="${esc(s.nazov)}" ${item?.typ_zakazky===s.nazov?'selected':''}>${esc(s.nazov)}</option>`).join('');
-    const vazbOpts = (State.lookups.vazby||[]).map(s => `<option value="${esc(s.vazba)}" ${item?.vazba===s.vazba?'selected':''}>${esc(s.vazba)} - ${esc(s.popis)}</option>`).join('');
+    const defaultVazba = (State.lookups.vazby||[]).find(s => s.is_default);
+    const defaultDPH = (State.lookups.sadzby_dph||[]).find(s => s.is_default);
+    const vazbOpts = (State.lookups.vazby||[]).map(s => `<option value="${esc(s.vazba)}" ${(item ? item.vazba===s.vazba : s.is_default)?'selected':''}>${esc(s.vazba)} - ${esc(s.popis)}</option>`).join('');
     const v = k => esc(item?.[k] ?? '');
     const chk = k => item?.[k] ? 'checked' : '';
+    const defaultDPHVal = item ? (item.sadzba_dph??0.2) : (defaultDPH ? defaultDPH.sadzba : 0.2);
     const body = `
     <div class="tabs">
       <span class="tab active" onclick="switchTab(this,'if-basic')">Základné</span>
@@ -976,7 +982,7 @@ Views.items = {
         <div class="field"><label>JC (bez DPH)</label><input type="number" step="0.01" id="fi-jc" value="${item?.jc??''}" oninput="calcItemPrice()"></div>
         <div class="field"><label>Zľava (0-1)</label><input type="number" step="0.01" min="0" max="1" id="fi-zlava" value="${item?.zlava??0}" oninput="calcItemPrice()"></div>
         <div class="field"><label>Cena bez DPH</label><input type="number" step="0.01" id="fi-cena" value="${item?.cena??''}" readonly style="background:#f8fafc"></div>
-        <div class="field"><label>Sadzba DPH (0-1)</label><input type="number" step="0.01" min="0" max="1" id="fi-sadzba_dph" value="${item?.sadzba_dph??0.2}" oninput="calcItemPrice()"></div>
+        <div class="field"><label>Sadzba DPH (0-1)</label><input type="number" step="0.01" min="0" max="1" id="fi-sadzba_dph" value="${defaultDPHVal}" oninput="calcItemPrice()"></div>
         <div class="field"><label>Cena s DPH</label><input type="number" step="0.01" id="fi-cena_s_dph" value="${item?.cena_s_dph??''}" readonly style="background:#f8fafc"></div>
         <div class="field"><label>Status</label><select id="fi-status"><option value="">—</option>${statOpts}</select></div>
         <div class="field"><label>Typ zákazky</label><select id="fi-typ_zakazky"><option value="">—</option>${typOpts}</select></div>
@@ -1168,7 +1174,12 @@ Views.invoices = {
   async openEdit(id) { const f = State.invoices.data.find(i => i.id === id); if (f) this.openForm(f); },
 
   openForm(f) {
+    const ud = State.firemneUdaje || {};
     const v = k => esc(f?.[k] ?? '');
+    // For new invoices pre-fill payment details from company settings
+    const defForma = f ? v('forma_uhrady') : esc(ud.forma_uhrady || 'bankový prevod');
+    const defIban = f ? v('iban') : esc(ud.iban || '');
+    const defSwift = f ? v('swift') : esc(ud.swift || '');
     const projekty = State.lookups.projekty_select || [];
     const firmy = State.lookups.firmy || [];
     const projektOpts = `<option value="">— bez projektu —</option>` +
@@ -1190,9 +1201,9 @@ Views.invoices = {
       <div class="field"><label>Zostáva uhradiť</label><input type="number" step="0.01" id="fv-zostava_uhradit" value="${f?.zostava_uhradit??''}"></div>
       <div class="field"><label>Dní po splatnosti</label><input type="number" id="fv-dni_po_splatnosti" value="${f?.dni_po_splatnosti??''}"></div>
       <div class="field"><label>Dátum úhrady</label><input type="date" id="fv-datum_uhrady" value="${isoDate(f?.datum_uhrady)}"></div>
-      <div class="field"><label>Forma úhrady</label><input id="fv-forma_uhrady" value="${v('forma_uhrady')}" placeholder="bankový prevod"></div>
-      <div class="field"><label>IBAN</label><input id="fv-iban" value="${v('iban')}"></div>
-      <div class="field"><label>SWIFT/BIC</label><input id="fv-swift" value="${v('swift')}"></div>
+      <div class="field"><label>Forma úhrady</label><input id="fv-forma_uhrady" value="${defForma}" placeholder="bankový prevod"></div>
+      <div class="field"><label>IBAN</label><input id="fv-iban" value="${defIban}"></div>
+      <div class="field"><label>SWIFT/BIC</label><input id="fv-swift" value="${defSwift}"></div>
       <div class="field form-full"><label>Poznámka na faktúre</label><textarea id="fv-poznamka" rows="2" style="width:100%">${v('poznamka')}</textarea></div>
     </div>`;
     App.openModal(f ? `Upraviť faktúru ${f.cislo_faktury}` : 'Nová faktúra', body, f?.id, !!f);
@@ -1853,11 +1864,12 @@ Views.settings = {
       <div class="settings-row" data-id="${r.id}" data-endpoint="vazby">
         <input placeholder="Kód" value="${esc(r.vazba||'')}" style="width:100px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fv-vazba">
         <input placeholder="Popis" value="${esc(r.popis||'')}" style="flex:1;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fv-popis">
+        <button class="btn-icon" title="Nastaviť ako predvolenú" style="${r.is_default?'color:var(--primary);font-weight:bold':''}" onclick="Views.settings.setDefault('vazby',${r.id},this)">⭐</button>
         <button class="btn-icon" onclick="Views.settings.saveVazba(this)">💾</button>
         <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
       </div>`).join('');
     return `<div class="settings-section">
-      <div class="settings-section-header"><h3>Väzby</h3>
+      <div class="settings-section-header"><h3>Väzby <small style="font-weight:normal;color:var(--text-muted)">(⭐ = predvolená)</small></h3>
         <button class="btn btn-sm btn-primary" onclick="Views.settings.addVazba(this)">+ Pridať</button>
       </div>
       <div class="settings-section-body" id="sb-vazby">${rowsHtml}</div>
@@ -1869,11 +1881,14 @@ Views.settings = {
       <div class="settings-row" data-id="${r.id}" data-endpoint="sadzby-dph">
         <input type="number" step="0.01" value="${r.sadzba??''}" style="width:100px;padding:5px;border:1px solid var(--border);border-radius:4px;font-size:13px" class="fv-sadzba">
         <span style="font-size:13px;color:var(--text-muted)">(${((r.sadzba||0)*100).toFixed(0)}%)</span>
+        <button class="btn-icon" title="Nastaviť ako predvolenú" style="${r.is_default?'color:var(--primary);font-weight:bold':''}" onclick="Views.settings.setDefault('sadzby-dph',${r.id},this)">⭐</button>
         <button class="btn-icon" onclick="Views.settings.saveDPH(this)">💾</button>
         <button class="btn-icon" onclick="Views.settings.deleteRow(this)">🗑</button>
       </div>`).join('');
     return `<div class="settings-section">
-      <div class="settings-section-header"><h3>Sadzby DPH</h3></div>
+      <div class="settings-section-header"><h3>Sadzby DPH <small style="font-weight:normal;color:var(--text-muted)">(⭐ = predvolená)</small></h3>
+        <button class="btn btn-sm btn-primary" onclick="Views.settings.addDPH(this)">+ Pridať</button>
+      </div>
       <div class="settings-section-body" id="sb-sadzby-dph">${rowsHtml}</div>
     </div>`;
   },
@@ -1940,6 +1955,31 @@ Views.settings = {
     const sadzba = parseFloat(row.querySelector('.fv-sadzba').value) || 0;
     await API.put(`/api/sadzby-dph/${id}`, { sadzba });
     await this.refreshLookups();
+  },
+
+  async addDPH() {
+    const val = prompt('Sadzba DPH (napr. 0.20 pre 20%):');
+    if (val === null) return;
+    const sadzba = parseFloat(val) || 0;
+    await API.post('/api/sadzby-dph', { sadzba });
+    await this.refreshLookups();
+    this.render();
+  },
+
+  async setDefault(endpoint, id, btn) {
+    await API.post(`/api/${endpoint}/${id}/set-default`, {});
+    await this.refreshLookups();
+    // Update star buttons in same section
+    const section = btn.closest('.settings-section');
+    if (section) {
+      section.querySelectorAll('.btn-icon[title="Nastaviť ako predvolenú"]').forEach(b => {
+        b.style.color = '';
+        b.style.fontWeight = '';
+      });
+      btn.style.color = 'var(--primary)';
+      btn.style.fontWeight = 'bold';
+    }
+    showToast('Predvolená hodnota nastavená', 'success');
   },
 
   async deleteRow(btn) {
@@ -2440,6 +2480,7 @@ Views.settings.sectionFiremneUdaje = async function() {
         ${f('iban','IBAN',ud.iban,'text','SK12 3456...')}
         ${f('swift','SWIFT/BIC',ud.swift,'text','GIBASKBX')}
         ${f('banka','Banka',ud.banka,'text','VÚB a.s.')}
+        ${f('forma_uhrady','Predvolená forma úhrady',ud.forma_uhrady,'text','bankový prevod')}
         ${f('telefon','Telefón',ud.telefon)}
         ${f('email','E-mail',ud.email,'email')}
         ${f('web','Web',ud.web,'text','www.firma.sk')}
@@ -2454,12 +2495,13 @@ Views.settings.sectionFiremneUdaje = async function() {
 };
 
 Views.settings.saveFiremneUdaje = async function() {
-  const fields = ['nazov','adresa','mesto','psc','ico','dic','ic_dph','iban','swift','banka','telefon','email','web'];
+  const fields = ['nazov','adresa','mesto','psc','ico','dic','ic_dph','iban','swift','banka','forma_uhrady','telefon','email','web'];
   const data = {};
   fields.forEach(k => { data[k] = document.getElementById('fu-'+k)?.value.trim() || null; });
   data.poznamka_fa = document.getElementById('fu-poznamka_fa')?.value.trim() || null;
   try {
-    await API.put('/api/firemne-udaje', data);
+    const saved = await API.put('/api/firemne-udaje', data);
+    State.firemneUdaje = saved || data;
     App.toast('Firemné údaje uložené', 'success');
   } catch(e) { App.toast(e.message || 'Chyba', 'error'); }
 };

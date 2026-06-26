@@ -32,6 +32,11 @@ async def init_db():
             # Imposition links
             "ALTER TABLE vyradovanie ADD COLUMN id_projektu INTEGER",
             "ALTER TABLE vyradovanie ADD COLUMN id_polozky INTEGER",
+            # Default flags for lookup tables
+            "ALTER TABLE vazby ADD COLUMN is_default INTEGER DEFAULT 0",
+            "ALTER TABLE sadzba_dph ADD COLUMN is_default INTEGER DEFAULT 0",
+            # Company defaults for invoice pre-fill
+            "ALTER TABLE firemne_udaje ADD COLUMN forma_uhrady TEXT",
             # Firemne udaje table (failsafe if create_all missed it)
             """CREATE TABLE IF NOT EXISTS firemne_udaje (
                 id INTEGER PRIMARY KEY DEFAULT 1,

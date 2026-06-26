@@ -88,6 +88,17 @@ def make_crud(model, prefix, require_auth=False):
         await db.refresh(obj)
         return obj
 
+    @sub.post("/{obj_id}/set-default", dependencies=auth_dep)
+    async def set_default(obj_id: int, db: AsyncSession = Depends(get_db)):
+        cols = _safe_columns(model)
+        if "is_default" not in cols:
+            raise HTTPException(status_code=400, detail="Model has no is_default column")
+        all_rows = (await db.execute(select(model))).scalars().all()
+        for row in all_rows:
+            row.is_default = (row.id == obj_id)
+        await db.commit()
+        return {"ok": True}
+
     @sub.delete("/{obj_id}", dependencies=auth_dep)
     async def delete(obj_id: int, db: AsyncSession = Depends(get_db)):
         r = await db.execute(select(model).where(model.id == obj_id))

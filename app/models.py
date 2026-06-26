@@ -252,6 +252,7 @@ class FiremneUdaje(Base):
     iban = Column(String(100))
     swift = Column(String(30))
     banka = Column(String(100))
+    forma_uhrady = Column(String(100))
     telefon = Column(String(50))
     email = Column(String(255))
     web = Column(String(255))
@@ -383,6 +384,7 @@ class Vazba(Base):
     id = Column(Integer, primary_key=True)
     vazba = Column(String(20))
     popis = Column(String(30))
+    is_default = Column(Boolean, default=False)
 
 
 class PovrchovaUprava(Base):
@@ -396,6 +398,7 @@ class SadzbaDPH(Base):
     __tablename__ = "sadzba_dph"
     id = Column(Integer, primary_key=True)
     sadzba = Column(Float)
+    is_default = Column(Boolean, default=False)
 
 
 class User(Base):
