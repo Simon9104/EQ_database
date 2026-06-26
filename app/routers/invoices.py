@@ -1,14 +1,31 @@
 import io
+import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from typing import Optional
 from app.database import get_db
 from app.models import Invoice, Item, Project, Firma, FiremneUdaje
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
+
+
+@router.get("/next-number")
+async def next_invoice_number(db: AsyncSession = Depends(get_db)):
+    year = datetime.now().year
+    prefix = f"{year}/"
+    result = await db.execute(
+        select(Invoice.cislo_faktury).where(Invoice.cislo_faktury.like(f"{prefix}%"))
+    )
+    existing = result.scalars().all()
+    max_seq = 0
+    for num in existing:
+        m = re.search(r"/(\d+)$", num or "")
+        if m:
+            max_seq = max(max_seq, int(m.group(1)))
+    return {"cislo_faktury": f"{prefix}{max_seq + 1:03d}"}
 
 
 @router.get("")

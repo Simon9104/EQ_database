@@ -1173,40 +1173,71 @@ Views.invoices = {
   openAdd() { this.openForm(null); },
   async openEdit(id) { const f = State.invoices.data.find(i => i.id === id); if (f) this.openForm(f); },
 
-  openForm(f) {
+  async openForm(f) {
     const ud = State.firemneUdaje || {};
     const v = k => esc(f?.[k] ?? '');
-    // For new invoices pre-fill payment details from company settings
-    const defForma = f ? v('forma_uhrady') : esc(ud.forma_uhrady || 'bankový prevod');
-    const defIban = f ? v('iban') : esc(ud.iban || '');
-    const defSwift = f ? v('swift') : esc(ud.swift || '');
     const projekty = State.lookups.projekty_select || [];
     const firmy = State.lookups.firmy || [];
+    const dphRates = State.lookups.sadzby_dph || [];
+
+    // Auto-generate invoice number for new invoices
+    let autoNumber = '';
+    if (!f) {
+      try { const r = await API.get('/api/invoices/next-number'); autoNumber = r?.cislo_faktury || ''; } catch(e) {}
+    }
+
+    // Auto-fill dates
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const splatnostDni = ud.splatnost_dni ?? 30;
+    const splatnostDate = new Date(); splatnostDate.setDate(splatnostDate.getDate() + splatnostDni);
+    const splatnostStr = splatnostDate.toISOString().slice(0, 10);
+
+    const defForma = f ? v('forma_uhrady') : esc(ud.forma_uhrady || 'bankový prevod');
+    const defIban  = f ? v('iban')  : esc(ud.iban  || '');
+    const defSwift = f ? v('swift') : esc(ud.swift || '');
+
     const projektOpts = `<option value="">— bez projektu —</option>` +
       projekty.map(p => `<option value="${p.id}" ${f?.id_projektu===p.id?'selected':''}>#${p.id} ${esc(p.nazov_projektu||'')}</option>`).join('');
     const firmaOpts = `<option value="">— bez firmy —</option>` +
       firmy.map(fi => `<option value="${fi.id}" ${f?.firma_id===fi.id?'selected':''}>${esc(fi.nazov||'')}</option>`).join('');
+
+    // Find current DPH rate for existing invoice (reverse-calculate)
+    const existingBez = f?.suma_bez_dph || 0;
+    const existingDph = f?.suma_s_dph || 0;
+    const existingRate = existingBez > 0 ? Math.round((existingDph / existingBez) * 100) / 100 : null;
+    const defaultDph = dphRates.find(r => r.is_default) || dphRates[0];
+    const dphOpts = dphRates.map(r => {
+      const selected = existingRate != null ? Math.abs(r.sadzba - existingRate) < 0.001 : r.is_default;
+      return `<option value="${r.sadzba}" ${selected?'selected':''}>${(r.sadzba*100).toFixed(0)}%</option>`;
+    }).join('');
+
     const body = `<div class="form-grid">
-      <div class="field"><label>Č. faktúry</label><input id="fv-cislo_faktury" value="${v('cislo_faktury')}"></div>
+      <div class="field">
+        <label>Č. faktúry ${f ? '' : '<span style="font-size:11px;color:var(--text-muted)">(auto)</span>'}</label>
+        <input id="fv-cislo_faktury" value="${f ? v('cislo_faktury') : esc(autoNumber)}" ${f ? '' : 'style="background:#f8fafc;font-weight:600"'}>
+      </div>
       <div class="field"><label>Variabilný symbol</label><input id="fv-vs" value="${v('vs')}"></div>
-      <div class="field"><label>Dátum vystavenia</label><input type="date" id="fv-datum_vystavenia" value="${isoDate(f?.datum_vystavenia)}"></div>
-      <div class="field"><label>Dátum splatnosti</label><input type="date" id="fv-datum_splatnosti" value="${isoDate(f?.datum_splatnosti)}"></div>
-      <div class="field form-full"><label>Odberateľ (názov)</label><input id="fv-odberatel" value="${v('odberatel')}"></div>
+      <div class="field"><label>Dátum vystavenia</label><input type="date" id="fv-datum_vystavenia" value="${f ? isoDate(f.datum_vystavenia) : todayStr}" oninput="calcInvoiceDates()"></div>
+      <div class="field"><label>Splatnosť (${splatnostDni} dní)</label><input type="date" id="fv-datum_splatnosti" value="${f ? isoDate(f.datum_splatnosti) : splatnostStr}"></div>
+      <div class="field form-full"><label>Odberateľ</label><input id="fv-odberatel" value="${v('odberatel')}"></div>
       <div class="field"><label>Firma (z DB)</label><select id="fv-firma_id">${firmaOpts}</select></div>
       <div class="field"><label>Projekt</label><select id="fv-id_projektu">${projektOpts}</select></div>
       <div class="field form-full"><label>Popis</label><input id="fv-popis" value="${v('popis')}"></div>
-      <div class="field"><label>Suma bez DPH</label><input type="number" step="0.01" id="fv-suma_bez_dph" value="${f?.suma_bez_dph??''}"></div>
-      <div class="field"><label>Suma s DPH</label><input type="number" step="0.01" id="fv-suma_s_dph" value="${f?.suma_s_dph??''}"></div>
-      <div class="field"><label>Suma k úhrade</label><input type="number" step="0.01" id="fv-suma_k_uhrade" value="${f?.suma_k_uhrade??''}"></div>
-      <div class="field"><label>Zostáva uhradiť</label><input type="number" step="0.01" id="fv-zostava_uhradit" value="${f?.zostava_uhradit??''}"></div>
-      <div class="field"><label>Dní po splatnosti</label><input type="number" id="fv-dni_po_splatnosti" value="${f?.dni_po_splatnosti??''}"></div>
+      <div class="section-title">Sumy</div>
+      <div class="field"><label>Základ (bez DPH) €</label><input type="number" step="0.01" id="fv-suma_bez_dph" value="${f?.suma_bez_dph??''}" oninput="calcInvoiceTotals()"></div>
+      <div class="field"><label>Sadzba DPH</label><select id="fv-sadzba_dph" onchange="calcInvoiceTotals()">${dphOpts}</select></div>
+      <div class="field"><label>DPH €</label><input type="number" step="0.01" id="fv-suma_s_dph" value="${f?.suma_s_dph??''}" readonly style="background:#f8fafc"></div>
+      <div class="field"><label>Celkom k úhrade €</label><input type="number" step="0.01" id="fv-suma_k_uhrade" value="${f?.suma_k_uhrade??''}" readonly style="background:#f8fafc;font-weight:600"></div>
+      <div class="field"><label>Zostáva uhradiť €</label><input type="number" step="0.01" id="fv-zostava_uhradit" value="${f?.zostava_uhradit??''}"></div>
       <div class="field"><label>Dátum úhrady</label><input type="date" id="fv-datum_uhrady" value="${isoDate(f?.datum_uhrady)}"></div>
-      <div class="field"><label>Forma úhrady</label><input id="fv-forma_uhrady" value="${defForma}" placeholder="bankový prevod"></div>
+      <div class="section-title">Platobné údaje</div>
+      <div class="field"><label>Forma úhrady</label><input id="fv-forma_uhrady" value="${defForma}"></div>
       <div class="field"><label>IBAN</label><input id="fv-iban" value="${defIban}"></div>
       <div class="field"><label>SWIFT/BIC</label><input id="fv-swift" value="${defSwift}"></div>
       <div class="field form-full"><label>Poznámka na faktúre</label><textarea id="fv-poznamka" rows="2" style="width:100%">${v('poznamka')}</textarea></div>
     </div>`;
     App.openModal(f ? `Upraviť faktúru ${f.cislo_faktury}` : 'Nová faktúra', body, f?.id, !!f);
+    if (!f) calcInvoiceTotals();
   },
 
   async save() {
@@ -1214,11 +1245,18 @@ Views.invoices = {
     const nums = ['suma_bez_dph','suma_s_dph','suma_k_uhrade','zostava_uhradit','dni_po_splatnosti'];
     const dates = ['datum_vystavenia','datum_splatnosti','datum_uhrady'];
     const data = {};
-    text.forEach(f => { data[f] = document.getElementById('fv-'+f)?.value || null; });
-    nums.forEach(f => { const e = document.getElementById('fv-'+f); data[f] = e?.value !== '' ? parseFloat(e?.value) : null; });
-    dates.forEach(f => { data[f] = document.getElementById('fv-'+f)?.value || null; });
+    text.forEach(k => { data[k] = document.getElementById('fv-'+k)?.value || null; });
+    nums.forEach(k => { const e = document.getElementById('fv-'+k); data[k] = e?.value !== '' ? parseFloat(e?.value) : null; });
+    dates.forEach(k => { data[k] = document.getElementById('fv-'+k)?.value || null; });
     const fid = document.getElementById('fv-firma_id')?.value; data.firma_id = fid ? parseInt(fid) : null;
     const pid = document.getElementById('fv-id_projektu')?.value; data.id_projektu = pid ? parseInt(pid) : null;
+    // Calculate final totals from DPH selector if present
+    const sadzba = parseFloat(document.getElementById('fv-sadzba_dph')?.value);
+    if (!isNaN(sadzba) && data.suma_bez_dph != null) {
+      data.suma_s_dph = Math.round(data.suma_bez_dph * sadzba * 100) / 100;
+      data.suma_k_uhrade = Math.round((data.suma_bez_dph + data.suma_s_dph) * 100) / 100;
+      if (data.zostava_uhradit == null) data.zostava_uhradit = data.suma_k_uhrade;
+    }
     if (State.editId) await API.put('/api/invoices/' + State.editId, data);
     else await API.post('/api/invoices', data);
     showToast('Faktúra uložená', 'success');
@@ -2075,6 +2113,29 @@ function fmtBankDate(v) {
   if (s.length === 8) return `${s.slice(6,8)}.${s.slice(4,6)}.${s.slice(0,4)}`;
   return s;
 }
+function calcInvoiceTotals() {
+  const bez = parseFloat(document.getElementById('fv-suma_bez_dph')?.value) || 0;
+  const rate = parseFloat(document.getElementById('fv-sadzba_dph')?.value) || 0;
+  const dph = Math.round(bez * rate * 100) / 100;
+  const total = Math.round((bez + dph) * 100) / 100;
+  const dphEl = document.getElementById('fv-suma_s_dph');
+  const totalEl = document.getElementById('fv-suma_k_uhrade');
+  const zostaEl = document.getElementById('fv-zostava_uhradit');
+  if (dphEl) dphEl.value = dph.toFixed(2);
+  if (totalEl) totalEl.value = total.toFixed(2);
+  if (zostaEl && !zostaEl.dataset.dirty) zostaEl.value = total.toFixed(2);
+}
+function calcInvoiceDates() {
+  const ud = State.firemneUdaje || {};
+  const splatnostDni = ud.splatnost_dni ?? 30;
+  const vystavEl = document.getElementById('fv-datum_vystavenia');
+  const splatEl = document.getElementById('fv-datum_splatnosti');
+  if (!vystavEl || !splatEl) return;
+  const base = new Date(vystavEl.value);
+  if (isNaN(base.getTime())) return;
+  base.setDate(base.getDate() + splatnostDni);
+  splatEl.value = base.toISOString().slice(0, 10);
+}
 function calcNakladCena() {
   const pocet = parseFloat(document.getElementById('fn-pocet')?.value) || 0;
   const jc = parseFloat(document.getElementById('fn-jc_vyroba')?.value) || 0;
@@ -2481,6 +2542,7 @@ Views.settings.sectionFiremneUdaje = async function() {
         ${f('swift','SWIFT/BIC',ud.swift,'text','GIBASKBX')}
         ${f('banka','Banka',ud.banka,'text','VÚB a.s.')}
         ${f('forma_uhrady','Predvolená forma úhrady',ud.forma_uhrady,'text','bankový prevod')}
+        <div class="field"><label>Splatnosť faktúr (dni)</label><input type="number" id="fu-splatnost_dni" value="${ud.splatnost_dni??30}" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px"></div>
         ${f('telefon','Telefón',ud.telefon)}
         ${f('email','E-mail',ud.email,'email')}
         ${f('web','Web',ud.web,'text','www.firma.sk')}
@@ -2496,6 +2558,8 @@ Views.settings.sectionFiremneUdaje = async function() {
 
 Views.settings.saveFiremneUdaje = async function() {
   const fields = ['nazov','adresa','mesto','psc','ico','dic','ic_dph','iban','swift','banka','forma_uhrady','telefon','email','web'];
+  const splatEl = document.getElementById('fu-splatnost_dni');
+  if (splatEl) data.splatnost_dni = parseInt(splatEl.value) || 30;
   const data = {};
   fields.forEach(k => { data[k] = document.getElementById('fu-'+k)?.value.trim() || null; });
   data.poznamka_fa = document.getElementById('fu-poznamka_fa')?.value.trim() || null;

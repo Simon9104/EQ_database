@@ -253,6 +253,7 @@ class FiremneUdaje(Base):
     swift = Column(String(30))
     banka = Column(String(100))
     forma_uhrady = Column(String(100))
+    splatnost_dni = Column(Integer, default=30)
     telefon = Column(String(50))
     email = Column(String(255))
     web = Column(String(255))
