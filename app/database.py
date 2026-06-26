@@ -37,6 +37,7 @@ async def init_db():
             "ALTER TABLE sadzba_dph ADD COLUMN is_default INTEGER DEFAULT 0",
             # Company defaults for invoice pre-fill
             "ALTER TABLE firemne_udaje ADD COLUMN forma_uhrady TEXT",
+            "ALTER TABLE firemne_udaje ADD COLUMN splatnost_dni INTEGER DEFAULT 30",
             # Firemne udaje table (failsafe if create_all missed it)
             """CREATE TABLE IF NOT EXISTS firemne_udaje (
                 id INTEGER PRIMARY KEY DEFAULT 1,
